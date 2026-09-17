@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import {
   X,
   Globe,
@@ -6,7 +6,8 @@ import {
   Sparkles,
   CheckCircle2,
   RefreshCw,
-  Image as ImageIcon,
+  Loader2,
+  Check,
   Monitor,
   Smartphone
 } from "lucide-react";
@@ -28,48 +29,117 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
   const [iconUrl, setIconUrl] = useState("");
   const [description, setDescription] = useState("");
   const [isValidating, setIsValidating] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [detectedSuccess, setDetectedSuccess] = useState(false);
 
-  if (!isOpen) return null;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const userEditedNameRef = useRef(false);
+  const userEditedIconRef = useRef(false);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Auto probe URL to fetch title and favicon icon
-  const handleUrlBlur = async () => {
-    const trimmed = url.trim();
-    if (!trimmed) return;
+  const detectMetadata = useCallback(async (inputUrl: string, force = false) => {
+    const trimmed = inputUrl.trim();
+    if (!trimmed || trimmed.length < 3) return;
+
+    // Must look like a domain or URL
+    if (!force && !trimmed.includes(".") && !trimmed.startsWith("http")) {
+      return;
+    }
 
     let formatted = trimmed;
     if (!/^https?:\/\//i.test(formatted)) {
-      formatted = "https://" + formatted;
-      setUrl(formatted);
+      formatted = "https://" + formatted.replace(/^\/\//, "");
     }
 
+    // Cancel any previous pending request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     setIsValidating(true);
+    setDetectedSuccess(false);
+
     try {
       const res = await fetch("/api/validate-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: formatted }),
+        signal: abortControllerRef.current.signal,
       });
+
+      if (!res.ok) return;
       const data = await res.json();
+
       if (data.valid) {
-        if (data.title && !name) {
-          setName(data.title.slice(0, 24));
+        const detectedTitle = data.appName || data.title;
+        if (detectedTitle && (!userEditedNameRef.current || !name.trim())) {
+          setName(detectedTitle);
         }
-        if (data.faviconUrl && !iconUrl) {
-          setIconUrl(data.faviconUrl);
+
+        const detectedFavicon = data.faviconUrl || data.googleFaviconUrl;
+        if (detectedFavicon && !userEditedIconRef.current) {
+          setIconUrl(detectedFavicon);
         }
+
+        setDetectedSuccess(true);
       }
-    } catch {
-      // Best effort
+    } catch (err: any) {
+      if (err?.name !== "AbortError") {
+        console.warn("Auto-detect note:", err);
+      }
     } finally {
       setIsValidating(false);
     }
+  }, [name]);
+
+  // Trigger on typing with debounce
+  const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newVal = e.target.value;
+    setUrl(newVal);
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    if (newVal.trim().includes(".")) {
+      debounceTimerRef.current = setTimeout(() => {
+        detectMetadata(newVal, false);
+      }, 350);
+    }
+  };
+
+  // Instant trigger on paste
+  const handleUrlPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pastedText = e.clipboardData.getData("text");
+    if (pastedText) {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      setTimeout(() => {
+        detectMetadata(pastedText, true);
+      }, 50);
+    }
+  };
+
+  const handleUrlBlur = () => {
+    if (url.trim()) {
+      detectMetadata(url, true);
+    }
+  };
+
+  // Track if user manually changes name
+  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    userEditedNameRef.current = true;
+    setName(e.target.value);
   };
 
   // Upload custom icon
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      userEditedIconRef.current = true;
       const reader = new FileReader();
       reader.onload = () => {
         if (typeof reader.result === "string") {
@@ -87,13 +157,14 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
 
     let validUrl = rawUrl;
     if (!/^https?:\/\//i.test(validUrl)) {
-      validUrl = "https://" + validUrl;
+      validUrl = "https://" + validUrl.replace(/^\/\//, "");
     }
 
     let finalName = name.trim();
     if (!finalName) {
       try {
-        finalName = new URL(validUrl).hostname;
+        const h = new URL(validUrl).hostname.replace(/^www\./i, "");
+        finalName = h.charAt(0).toUpperCase() + h.slice(1).split(".")[0];
       } catch {
         finalName = "Web App";
       }
@@ -103,7 +174,7 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
       id: `${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
       name: finalName,
       url: validUrl,
-      iconUrl: iconUrl.trim() || ECHO_LOGO_URL,
+      iconUrl: iconUrl.trim() || `https://www.google.com/s2/favicons?domain=${new URL(validUrl).hostname}&sz=256`,
       description: description.trim() || undefined,
       status: "completed",
       buildCount: 1,
@@ -119,7 +190,12 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
     setName("");
     setIconUrl("");
     setDescription("");
+    userEditedNameRef.current = false;
+    userEditedIconRef.current = false;
+    setDetectedSuccess(false);
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
@@ -127,14 +203,17 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
         {/* Modal Header */}
         <div className="px-6 py-4 border-b border-slate-200/80 flex items-center justify-between bg-slate-50/50">
           <div className="flex items-center space-x-2">
-            <div className="w-7 h-7 rounded-lg bg-sky-600 flex items-center justify-center text-white">
+            <div className="w-7 h-7 rounded-lg bg-sky-600 flex items-center justify-center text-white shadow-xs">
               <Sparkles className="w-4 h-4" />
             </div>
-            <h3 className="font-bold text-base text-slate-900">Quick App Creation</h3>
+            <div>
+              <h3 className="font-bold text-base text-slate-900 leading-tight">Quick App Creation</h3>
+              <p className="text-[11px] text-slate-500">Auto-detects name, logo, and converts in seconds</p>
+            </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
           >
             <X className="w-5 h-5" />
           </button>
@@ -144,9 +223,24 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
         <form onSubmit={handleCreate} className="p-6 space-y-4">
           {/* 1. URL */}
           <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-              1. Website URL <span className="text-sky-600">*</span>
-            </label>
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                1. Website URL <span className="text-sky-600">*</span>
+              </label>
+              {isValidating ? (
+                <span className="text-[11px] text-sky-600 font-medium inline-flex items-center gap-1 animate-pulse">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Auto-detecting logo &amp; name...
+                </span>
+              ) : detectedSuccess ? (
+                <span className="text-[11px] text-emerald-600 font-semibold inline-flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  <Check className="w-3 h-3 text-emerald-600" />
+                  Auto-detected!
+                </span>
+              ) : (
+                <span className="text-[10px] text-slate-400">Paste any URL or domain</span>
+              )}
+            </div>
             <div className="relative">
               <div className="absolute left-3 top-3 text-slate-400">
                 <Globe className="w-4 h-4" />
@@ -155,35 +249,56 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
                 type="text"
                 required
                 value={url}
-                onChange={(e) => setUrl(e.target.value)}
+                onChange={handleUrlChange}
+                onPaste={handleUrlPaste}
                 onBlur={handleUrlBlur}
-                placeholder="https://discord.com or https://yourwebsite.com"
-                className="w-full pl-9 pr-9 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
+                placeholder="Paste link: e.g. discord.com, youtube.com, github.com"
+                className="w-full pl-9 pr-10 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
               />
-              {isValidating && (
-                <div className="absolute right-3 top-3">
-                  <RefreshCw className="w-4 h-4 text-slate-400 animate-spin" />
-                </div>
-              )}
+              <div className="absolute right-3 top-3 flex items-center">
+                {isValidating ? (
+                  <Loader2 className="w-4 h-4 text-sky-600 animate-spin" />
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => detectMetadata(url, true)}
+                    title="Auto-detect name & logo"
+                    className="text-slate-400 hover:text-sky-600 transition-colors p-0.5"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
             <p className="text-[11px] text-slate-500">
-              Paste any URL. We automatically detect the title and website icon.
+              Instant auto-detection: paste any link and we immediately fetch the official title and logo!
             </p>
           </div>
 
           {/* 2. Name */}
           <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-              2. App Name <span className="text-sky-600">*</span>
-            </label>
-            <input
-              type="text"
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Discord, ModCube, My App"
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
-            />
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                2. App Name <span className="text-sky-600">*</span>
+              </label>
+              {name && (
+                <span className="text-[10px] text-slate-400">
+                  {userEditedNameRef.current ? "Custom Name" : "Auto-detected"}
+                </span>
+              )}
+            </div>
+            <div className="relative">
+              <input
+                type="text"
+                required
+                value={name}
+                onChange={handleNameChange}
+                placeholder={isValidating ? "Detecting name..." : "e.g. Discord, YouTube, My App"}
+                className={`w-full px-3.5 py-2.5 bg-slate-50 border rounded-xl text-slate-900 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all ${
+                  isValidating ? "border-sky-300 bg-sky-50/30" : "border-slate-300"
+                }`}
+              />
+            </div>
           </div>
 
           {/* 3. Icon */}
@@ -192,18 +307,28 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                 3. App Icon
               </label>
-              {!iconUrl && (
-                <span className="text-[10px] font-semibold text-sky-600 bg-sky-50 px-1.5 py-0.5 rounded border border-sky-200">
-                  Echo Pre-Logo (Default)
-                </span>
-              )}
+              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
+                iconUrl
+                  ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                  : "text-sky-600 bg-sky-50 border-sky-200"
+              }`}>
+                {isValidating
+                  ? "Fetching logo..."
+                  : iconUrl
+                  ? (userEditedIconRef.current ? "Custom Icon" : "Official Logo Detected")
+                  : "Echo Pre-Logo (Default)"}
+              </span>
             </div>
             <div className="flex items-center space-x-3">
-              <div className="w-12 h-12 rounded-xl border border-slate-200 bg-slate-50 flex items-center justify-center shrink-0 overflow-hidden">
+              <div className={`w-14 h-14 rounded-xl border bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-xs p-1 transition-all ${
+                isValidating
+                  ? "border-sky-400 ring-2 ring-sky-300 animate-pulse bg-sky-50/50"
+                  : "border-slate-200"
+              }`}>
                 <img
                   src={iconUrl || ECHO_LOGO_URL}
                   alt="App Icon"
-                  className="w-full h-full object-contain p-1"
+                  className="w-full h-full object-contain rounded-lg"
                   onError={(e) => {
                     (e.target as HTMLImageElement).src = ECHO_LOGO_URL;
                   }}
@@ -230,15 +355,20 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
                   {iconUrl && (
                     <button
                       type="button"
-                      onClick={() => setIconUrl("")}
+                      onClick={() => {
+                        userEditedIconRef.current = false;
+                        setIconUrl("");
+                      }}
                       className="text-xs text-rose-500 hover:underline cursor-pointer"
                     >
-                      Reset to Echo Pre-Logo
+                      Reset
                     </button>
                   )}
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  {iconUrl ? "Custom icon loaded" : "Pre-logo of Echo used automatically if none selected"}
+                  {iconUrl
+                    ? "Official high-res icon will be embedded in Windows .EXE & Android .APK"
+                    : "Paste a URL above to auto-detect official icon, or upload an image."}
                 </p>
               </div>
             </div>
@@ -260,10 +390,10 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
           <div className="pt-2">
             <button
               type="submit"
-              disabled={!url.trim()}
-              className="w-full py-3 px-4 bg-sky-600 hover:bg-sky-700 active:bg-sky-800 disabled:opacity-50 text-white font-bold text-sm rounded-xl transition-colors shadow-sm shadow-sky-600/20 flex items-center justify-center space-x-2 cursor-pointer"
+              className="w-full py-2.5 px-4 bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white font-bold text-sm rounded-xl transition-colors shadow-xs flex items-center justify-center space-x-2 cursor-pointer"
             >
-              <span>Create App Now</span>
+              <Sparkles className="w-4 h-4" />
+              <span>Create &amp; Download App</span>
             </button>
           </div>
         </form>

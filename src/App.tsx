@@ -1,5 +1,18 @@
-import React, { useState, useEffect } from "react";
-import { Plus, Sparkles, Layers, History, CheckCircle2, Monitor, Smartphone, Download, ExternalLink } from "lucide-react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import {
+  Plus,
+  Sparkles,
+  Layers,
+  History,
+  CheckCircle2,
+  Monitor,
+  Smartphone,
+  Download,
+  ExternalLink,
+  Loader2,
+  Check,
+  RefreshCw,
+} from "lucide-react";
 import { AppProject, DashboardView, DownloadNotification, ECHO_LOGO_URL } from "./types";
 import { Sidebar } from "./components/Sidebar";
 import { TopNav } from "./components/TopNav";
@@ -76,38 +89,93 @@ export default function App() {
   const [quickName, setQuickName] = useState("");
   const [quickIconUrl, setQuickIconUrl] = useState("");
   const [quickValidating, setQuickValidating] = useState(false);
+  const [quickDetected, setQuickDetected] = useState(false);
+
+  const quickDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const quickAbortRef = useRef<AbortController | null>(null);
+  const userEditedQuickNameRef = useRef(false);
 
   // Probe URL to auto-fill title and icon
-  const handleQuickUrlBlur = async () => {
-    const trimmed = quickUrl.trim();
-    if (!trimmed) return;
+  const detectQuickMetadata = useCallback(async (rawInput: string, force = false) => {
+    const trimmed = rawInput.trim();
+    if (!trimmed || trimmed.length < 3) return;
+
+    if (!force && !trimmed.includes(".") && !trimmed.startsWith("http")) {
+      return;
+    }
 
     let formatted = trimmed;
     if (!/^https?:\/\//i.test(formatted)) {
-      formatted = "https://" + formatted;
-      setQuickUrl(formatted);
+      formatted = "https://" + formatted.replace(/^\/\//, "");
     }
 
+    if (quickAbortRef.current) {
+      quickAbortRef.current.abort();
+    }
+    quickAbortRef.current = new AbortController();
+
     setQuickValidating(true);
+    setQuickDetected(false);
+
     try {
       const res = await fetch("/api/validate-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: formatted }),
+        signal: quickAbortRef.current.signal,
       });
+      if (!res.ok) return;
       const data = await res.json();
       if (data.valid) {
-        if (data.title && !quickName) {
-          setQuickName(data.title.slice(0, 24));
+        const detectedTitle = data.appName || data.title;
+        if (detectedTitle && (!userEditedQuickNameRef.current || !quickName.trim())) {
+          setQuickName(detectedTitle);
         }
-        if (data.faviconUrl && !quickIconUrl) {
-          setQuickIconUrl(data.faviconUrl);
+        const detectedFavicon = data.faviconUrl || data.googleFaviconUrl;
+        if (detectedFavicon) {
+          setQuickIconUrl(detectedFavicon);
         }
+        setQuickDetected(true);
       }
-    } catch {
-      // Best effort
+    } catch (err: any) {
+      if (err?.name !== "AbortError") {
+        console.warn("Quick probe note:", err);
+      }
     } finally {
       setQuickValidating(false);
+    }
+  }, [quickName]);
+
+  const handleQuickUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setQuickUrl(val);
+
+    if (quickDebounceRef.current) {
+      clearTimeout(quickDebounceRef.current);
+    }
+
+    if (val.trim().includes(".")) {
+      quickDebounceRef.current = setTimeout(() => {
+        detectQuickMetadata(val, false);
+      }, 350);
+    }
+  };
+
+  const handleQuickUrlPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
+    const pasted = e.clipboardData.getData("text");
+    if (pasted) {
+      if (quickDebounceRef.current) {
+        clearTimeout(quickDebounceRef.current);
+      }
+      setTimeout(() => {
+        detectQuickMetadata(pasted, true);
+      }, 50);
+    }
+  };
+
+  const handleQuickUrlBlur = () => {
+    if (quickUrl.trim()) {
+      detectQuickMetadata(quickUrl, true);
     }
   };
 
@@ -277,37 +345,77 @@ export default function App() {
 
                 <form onSubmit={handleQuickConvert} className="p-6 sm:p-8 space-y-4">
                   <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                      Website URL <span className="text-sky-600">*</span>
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                        Website URL <span className="text-sky-600">*</span>
+                      </label>
+                      {quickValidating ? (
+                        <span className="text-[11px] text-sky-600 font-medium inline-flex items-center gap-1 animate-pulse">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Auto-detecting name &amp; logo...
+                        </span>
+                      ) : quickDetected ? (
+                        <span className="text-[11px] text-emerald-600 font-semibold inline-flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          Auto-detected!
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-400">Paste any website link or domain</span>
+                      )}
+                    </div>
                     <div className="relative">
                       <input
                         type="text"
                         required
                         value={quickUrl}
-                        onChange={(e) => setQuickUrl(e.target.value)}
+                        onChange={handleQuickUrlChange}
+                        onPaste={handleQuickUrlPaste}
                         onBlur={handleQuickUrlBlur}
-                        placeholder="https://example.com"
-                        className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
+                        placeholder="Paste link: e.g. discord.com, youtube.com, github.com"
+                        className="w-full pl-4 pr-10 py-3 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
                       />
-                      {quickValidating && (
-                        <div className="absolute right-3.5 top-3.5 text-xs text-sky-600 flex items-center space-x-1 font-medium">
-                          <span>Checking...</span>
-                        </div>
-                      )}
+                      <div className="absolute right-3.5 top-3.5 flex items-center">
+                        {quickValidating ? (
+                          <Loader2 className="w-4 h-4 text-sky-600 animate-spin" />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => detectQuickMetadata(quickUrl, true)}
+                            title="Auto-detect name & logo"
+                            className="text-slate-400 hover:text-sky-600 transition-colors p-0.5"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
+                    <p className="text-[11px] text-slate-500">
+                      Instant auto-detection: paste any link and we automatically fetch the official name &amp; logo!
+                    </p>
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                      App Name
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                        App Name
+                      </label>
+                      {quickName && (
+                        <span className="text-[10px] text-slate-400">
+                          {userEditedQuickNameRef.current ? "Custom Name" : "Auto-detected"}
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       value={quickName}
-                      onChange={(e) => setQuickName(e.target.value)}
-                      placeholder="My Web App"
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
+                      onChange={(e) => {
+                        userEditedQuickNameRef.current = true;
+                        setQuickName(e.target.value);
+                      }}
+                      placeholder={quickValidating ? "Detecting name..." : "e.g. Discord, YouTube, My Web App"}
+                      className={`w-full px-4 py-3 bg-slate-50 border rounded-xl text-slate-900 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all ${
+                        quickValidating ? "border-sky-300 bg-sky-50/30" : "border-slate-300"
+                      }`}
                     />
                   </div>
 
@@ -316,24 +424,38 @@ export default function App() {
                       <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                         App Icon
                       </label>
-                      <span className="text-[10px] font-semibold text-sky-600 bg-sky-50 px-2 py-0.5 rounded border border-sky-200">
-                        {quickIconUrl ? "Custom Favicon Found" : "Echo Pre-Logo (Default)"}
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
+                        quickIconUrl
+                          ? "text-emerald-700 bg-emerald-50 border-emerald-200"
+                          : "text-sky-600 bg-sky-50 border-sky-200"
+                      }`}>
+                        {quickValidating
+                          ? "Fetching logo..."
+                          : quickIconUrl
+                          ? "Official Logo Detected"
+                          : "Echo Pre-Logo (Default)"}
                       </span>
                     </div>
                     <div className="flex items-center space-x-3">
-                      <img
-                        src={quickIconUrl || ECHO_LOGO_URL}
-                        alt="Echo Pre-Logo"
-                        className="w-10 h-10 rounded-xl object-contain bg-slate-50 border border-slate-200 p-1"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = ECHO_LOGO_URL;
-                        }}
-                      />
+                      <div className={`w-12 h-12 rounded-xl border bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-xs p-1 transition-all ${
+                        quickValidating
+                          ? "border-sky-400 ring-2 ring-sky-300 animate-pulse bg-sky-50/50"
+                          : "border-slate-200"
+                      }`}>
+                        <img
+                          src={quickIconUrl || ECHO_LOGO_URL}
+                          alt="App Icon"
+                          className="w-full h-full object-contain rounded-lg"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = ECHO_LOGO_URL;
+                          }}
+                        />
+                      </div>
                       <input
                         type="text"
                         value={quickIconUrl}
                         onChange={(e) => setQuickIconUrl(e.target.value)}
-                        placeholder="Icon URL (optional - auto-defaults to Echo pre-logo)"
+                        placeholder="Icon URL (auto-detected, or paste custom image URL)"
                         className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
                       />
                     </div>

@@ -19,6 +19,11 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", app: "Echo - URL to App Converter" });
 });
 
+// Google Search Console Site Verification
+app.get("/google8d72cfb9e1595dd7.html", (req, res) => {
+  res.type("text/html").send("google-site-verification: google8d72cfb9e1595dd7.html");
+});
+
 // URL Validation Probe (Solves browser CORS issues by testing server-side)
 app.post("/api/validate-url", async (req, res) => {
   try {

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      (function() {
+        try {
+          var nativeFetch = typeof window.fetch === 'function' ? window.fetch.bind(window) : undefined;
+          var activeFetch = nativeFetch;
+          Object.defineProperty(window, 'fetch', {
+            get: function() {
+              return activeFetch;
+            },
+            set: function(val) {
+              activeFetch = typeof val === 'function' ? val : nativeFetch;
+            },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {
+          try {
+            if (typeof Window !== 'undefined' && Window.prototype) {
+              var nativeProtoFetch = Window.prototype.fetch;
+              Object.defineProperty(Window.prototype, 'fetch', {
+                get: function() {
+                  return this.__activeFetch || nativeProtoFetch;
+                },
+                set: function(val) {
+                  this.__activeFetch = val;
+                },
+                configurable: true,
+                enumerable: true
+              });
+            }
+          } catch (e2) {}
+        }
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Echo Converter - URL to EXE | URL to APK | URL to App | Web to App Converter</title>
+    <meta name="description" content="Echo Converter: Convert any website URL into Windows (.exe) and Android (.apk) apps instantly. Free online URL to EXE, URL to APK, URL to App, Web to App, Website to Android APK, and Website to Windows desktop application converter." />
+    <meta name="keywords" content="url to exe, url to apk, url to app, web to app, web to app converter, website to app, website to app converter, url to app converter, url to android app, url to windows app, convert url to exe, convert url to apk, convert url to app, convert website to apk, convert website to exe, website to apk, website to exe, echo converter, echo url to app, echo web to app, pwa to apk, html to exe, web2app, web2apk, web2exe" />
+    <meta name="author" content="Echo Converter" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+    <link rel="icon" type="image/png" href="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSYcIQWfKm61CCUiN_fQXj55cBN9_HVXzway2Tkhl5COx4HCm3L8TANtBtR&amp;s=10" />
+    <link rel="apple-touch-icon" href="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSYcIQWfKm61CCUiN_fQXj55cBN9_HVXzway2Tkhl5COx4HCm3L8TANtBtR&amp;s=10" />
+    
+    <!-- OpenGraph / Facebook / LinkedIn / Discord -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Echo Converter" />
+    <meta property="og:title" content="Echo Converter - URL to EXE | URL to APK | URL to App Converter" />
+    <meta property="og:description" content="Convert any website URL into native Windows (.exe) and Android (.apk) applications in seconds with Echo Converter. Free, direct official binary downloads." />
+    <meta property="og:image" content="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSYcIQWfKm61CCUiN_fQXj55cBN9_HVXzway2Tkhl5COx4HCm3L8TANtBtR&amp;s=10" />
+    
+    <!-- Twitter / X -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Echo Converter - URL to EXE | URL to APK | URL to App" />
+    <meta name="twitter:description" content="Convert any website URL into official Windows (.exe) and Android (.apk) apps with Echo Converter." />
+    <meta name="twitter:image" content="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSYcIQWfKm61CCUiN_fQXj55cBN9_HVXzway2Tkhl5COx4HCm3L8TANtBtR&amp;s=10" />
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet" />
+
+    <!-- Google Search Schema.org Structured Data (JSON-LD) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Echo Converter",
+      "alternateName": [
+        "Echo URL to App Converter",
+        "Echo URL to EXE Converter",
+        "Echo URL to APK Converter",
+        "URL to App",
+        "URL to EXE",
+        "URL to APK",
+        "Web to App Converter",
+        "Website to App Converter"
+      ],
+      "url": "https://echo.app",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Windows, Android, Web",
+      "description": "Echo Converter converts any website or URL into native Windows (.exe) and Android (.apk) apps with one click. Free, direct binary downloads with zero setup.",
+      "image": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSYcIQWfKm61CCUiN_fQXj55cBN9_HVXzway2Tkhl5COx4HCm3L8TANtBtR&s=10",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "featureList": [
+        "URL to Windows EXE compilation",
+        "URL to Android APK compilation and signing",
+        "URL to App packaging",
+        "Web to App conversion",
+        "Instant website favicon and title detection",
+        "Direct binary download without ZIP archives",
+        "100% free and unlimited conversions"
+      ]
+    }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

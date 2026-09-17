@@ -1,0 +1,9 @@
+# Web2App Executable & APK Builder Requirements
+# Install with: pip install -r requirements.txt
+
+PyQt6>=6.5.0
+requests>=2.31.0
+
+# Optional engines for pure-Python fallback:
+pywebview>=4.4.0
+pyinstaller>=6.3.0

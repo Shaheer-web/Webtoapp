@@ -1,0 +1,7 @@
+{
+  "name": "Echo Converter - URL to EXE, APK & App Converter",
+  "description": "Echo Converter turns any web URL into native Windows .EXE and Android .APK apps instantly. Convert URL to EXE, URL to APK, Web to App, Website to Android App, and Website to Windows App with 1-click downloads.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

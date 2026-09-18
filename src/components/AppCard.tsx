@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { Globe, Wrench, Settings, Clock, ExternalLink, Monitor, Smartphone, Download, Trash2, RefreshCw } from "lucide-react";
-import { AppProject, DownloadNotification, ECHO_LOGO_URL } from "../types";
-import { downloadFileBlob, triggerDirectDownload } from "../utils/downloadHelper";
+import { AppProject, DownloadNotification } from "../types";
+import { getWebsiteFaviconUrl, getWebsiteFallbackIcon } from "../utils/iconHelper";
+import { buildAndDownloadApp } from "../utils/clientAppBuilder";
 
 interface AppCardProps {
   app: AppProject;
@@ -14,78 +15,36 @@ interface AppCardProps {
 export const AppCard: React.FC<AppCardProps> = ({ app, onBuild, onSettings, onDelete, onNotify }) => {
   const [downloading, setDownloading] = useState<"exe" | "apk" | null>(null);
 
+  const websiteIcon = app.iconUrl || getWebsiteFaviconUrl(app.url) || getWebsiteFallbackIcon(app.url);
+
   const handleDirectDownload = async (type: "exe" | "apk") => {
     setDownloading(type);
     const formatLabel = type === "exe" ? "EXE" : "APK";
     const cleanName = app.name.trim() || "WebApp";
     const fileName = type === "exe" ? `${cleanName}.exe` : `${cleanName}.apk`;
 
-    if (onNotify) {
-      onNotify({
-        type: "preparing",
-        title: `Generating ${formatLabel}...`,
-        message: `Compiling ${cleanName} into direct ${formatLabel} package. Download starting...`,
-        appName: cleanName,
-        format: formatLabel,
-      });
-    }
-
     try {
-      const endpoint = type === "exe" ? "/api/generate-exe" : "/api/generate-apk";
-
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: app.url,
-          appName: cleanName,
-          packageId: `com.echo.${cleanName.toLowerCase().replace(/[^a-z0-9]/g, "") || "app"}`,
-          iconUrl: app.iconUrl,
-        }),
-      });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(errText || "Download generation failed");
-      }
-
-      const blob = await res.blob();
-      downloadFileBlob(blob, fileName);
+      await buildAndDownloadApp(type, app.url, cleanName, app.iconUrl);
 
       if (onNotify) {
         onNotify({
           type: "completed",
-          title: `Downloaded ${fileName}`,
-          message: `${cleanName} (${formatLabel}) was compiled and downloaded directly!`,
+          title: `Download Started: ${fileName}`,
+          message: `${cleanName} (${formatLabel}) download completed.`,
           appName: cleanName,
           format: formatLabel,
         });
       }
     } catch (err: any) {
-      console.warn("Primary download encountered issue, invoking direct fallback link:", err);
-      try {
-        const fallbackUrl = `/api/download-app?type=${type}&url=${encodeURIComponent(app.url)}&appName=${encodeURIComponent(cleanName)}&iconUrl=${encodeURIComponent(app.iconUrl || "")}`;
-        triggerDirectDownload(fallbackUrl, fileName);
-
-        if (onNotify) {
-          onNotify({
-            type: "completed",
-            title: `Download Started`,
-            message: `${cleanName} (${formatLabel}) download triggered directly. Please check your browser downloads folder!`,
-            appName: cleanName,
-            format: formatLabel,
-          });
-        }
-      } catch (fallbackErr: any) {
-        if (onNotify) {
-          onNotify({
-            type: "error",
-            title: "Download Failed",
-            message: err.message || "Failed to download app binary",
-            appName: cleanName,
-            format: formatLabel,
-          });
-        }
+      console.error("Direct download failed:", err);
+      if (onNotify) {
+        onNotify({
+          type: "error",
+          title: "Download Failed",
+          message: err?.message || "Could not generate download file.",
+          appName: cleanName,
+          format: formatLabel,
+        });
       }
     } finally {
       setDownloading(null);
@@ -98,14 +57,20 @@ export const AppCard: React.FC<AppCardProps> = ({ app, onBuild, onSettings, onDe
         {/* Card Header: App Name & Status */}
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center space-x-2.5">
-            <img
-              src={app.iconUrl || ECHO_LOGO_URL}
-              alt={app.name}
-              className="w-9 h-9 rounded-lg object-contain bg-slate-50 border border-slate-200 p-0.5"
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = ECHO_LOGO_URL;
-              }}
-            />
+            {websiteIcon ? (
+              <img
+                src={websiteIcon}
+                alt={app.name}
+                className="w-9 h-9 rounded-lg object-contain bg-slate-50 border border-slate-200 p-0.5"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = getWebsiteFallbackIcon(app.url);
+                }}
+              />
+            ) : (
+              <div className="w-9 h-9 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-500">
+                <Globe className="w-4 h-4" />
+              </div>
+            )}
             <div>
               <h3 className="font-bold text-base text-slate-900 tracking-tight truncate max-w-[170px]">
                 {app.name}

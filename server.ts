@@ -10,6 +10,18 @@ const PORT = 3000;
 
 app.use(express.json());
 
+// CORS & Safe Download Headers
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Range");
+  res.setHeader("Access-Control-Expose-Headers", "Content-Disposition, Content-Length");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
 // -----------------------------------------------------------------------------
 // API Endpoints
 // -----------------------------------------------------------------------------
@@ -293,23 +305,17 @@ app.post("/api/validate-url", async (req, res) => {
   }
 });
 
-// Helper to fetch and normalize any icon format into a Buffer
+// Helper to fetch and normalize any icon format into a Buffer (auto-detects website picture)
 async function getIconBuffer(iconUrl?: string, appUrl?: string): Promise<Buffer> {
-  // If icon is an SVG URL, browsers/ImageMagick without librsvg cannot rasterize it directly,
-  // so fetch high-res 256px PNG from Google Favicons service for the domain
-  if (iconUrl && /\.svg(\?|$)/i.test(iconUrl) && appUrl) {
+  const cleanAppUrl = appUrl ? (appUrl.startsWith("http") ? appUrl : `https://${appUrl}`) : "";
+  let host = "";
+  if (cleanAppUrl) {
     try {
-      const host = new URL(appUrl.startsWith("http") ? appUrl : `https://${appUrl}`).hostname;
-      const gRes = await fetch(`https://www.google.com/s2/favicons?domain=${host}&sz=256`, {
-        signal: AbortSignal.timeout(5000)
-      });
-      if (gRes.ok) {
-        const ab = await gRes.arrayBuffer();
-        if (ab.byteLength > 100) return Buffer.from(ab);
-      }
+      host = new URL(cleanAppUrl).hostname.replace(/^www\./i, "");
     } catch {}
   }
 
+  // 1. If an explicit icon URL is provided, attempt to fetch it
   if (iconUrl && iconUrl.startsWith("data:image/")) {
     const parts = iconUrl.split(",");
     if (parts[1]) {
@@ -321,37 +327,53 @@ async function getIconBuffer(iconUrl?: string, appUrl?: string): Promise<Buffer>
     try {
       const res = await fetch(iconUrl, {
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
           Accept: "image/png,image/x-icon,image/*,*/*;q=0.8"
         },
-        signal: AbortSignal.timeout(6000)
+        signal: AbortSignal.timeout(5000)
       });
       if (res.ok) {
         const ab = await res.arrayBuffer();
         const buf = Buffer.from(ab);
-        // If it downloaded an SVG, try Google Favicons PNG instead
-        if (buf.toString("utf8", 0, 100).includes("<svg") && appUrl) {
-          try {
-            const host = new URL(appUrl.startsWith("http") ? appUrl : `https://${appUrl}`).hostname;
-            const gRes = await fetch(`https://www.google.com/s2/favicons?domain=${host}&sz=256`, {
-              signal: AbortSignal.timeout(4000)
-            });
-            if (gRes.ok) {
-              const gab = await gRes.arrayBuffer();
-              if (gab.byteLength > 100) return Buffer.from(gab);
-            }
-          } catch {}
-        }
-        if (ab.byteLength > 100) {
+        // If it's a valid raster image (not SVG text) and has substance, use it
+        if (!buf.toString("utf8", 0, 100).includes("<svg") && ab.byteLength > 100) {
           return buf;
         }
       }
     } catch (e: any) {
-      console.warn("Could not fetch remote icon, using fallback:", e.message);
+      console.warn("Could not fetch remote iconUrl, attempting domain auto-detect:", e.message);
     }
   }
 
-  // Built-in high-quality PNG fallback
+  // 2. Auto-detect website picture from Google Favicons (high-res 256px) using host
+  if (host) {
+    try {
+      const gRes = await fetch(`https://www.google.com/s2/favicons?domain=${host}&sz=256`, {
+        signal: AbortSignal.timeout(4000)
+      });
+      if (gRes.ok) {
+        const ab = await gRes.arrayBuffer();
+        if (ab.byteLength > 100) {
+          return Buffer.from(ab);
+        }
+      }
+    } catch {}
+
+    // 3. Fallback: DuckDuckGo favicon
+    try {
+      const dRes = await fetch(`https://icons.duckduckgo.com/ip3/${host}.ico`, {
+        signal: AbortSignal.timeout(3000)
+      });
+      if (dRes.ok) {
+        const ab = await dRes.arrayBuffer();
+        if (ab.byteLength > 100) {
+          return Buffer.from(ab);
+        }
+      }
+    } catch {}
+  }
+
+  // 4. Built-in high-quality PNG fallback
   const fallbackPngPath = path.join(process.cwd(), "public", "default_app.png");
   if (fs.existsSync(fallbackPngPath)) {
     return fs.readFileSync(fallbackPngPath);
@@ -806,14 +828,19 @@ app.post("/api/generate-exe", async (req, res) => {
     if (!url) return res.status(400).send("URL is required");
 
     const safeName = (appName || "WebApp").replace(/[^a-zA-Z0-9_\- ]/g, "").trim() || "WebApp";
+    const safeFilename = safeName.replace(/[^\w\-\.]/g, "_") || "app";
     
     // Compile real PE32+ 64-bit Windows GUI Executable with embedded icon
     const exeBuffer = await buildWindowsExe(url, safeName, iconUrl);
 
-    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(safeName)}.exe"`);
-    res.setHeader("Content-Type", "application/vnd.microsoft.portable-executable");
-    res.setHeader("Content-Length", exeBuffer.length);
-    return res.send(exeBuffer);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition, Content-Length");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}.exe"; filename*=UTF-8''${encodeURIComponent(safeName)}.exe`);
+    res.setHeader("Content-Type", "application/octet-stream");
+    res.setHeader("Content-Length", exeBuffer.length.toString());
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    return res.end(exeBuffer);
   } catch (error: any) {
     console.error("Windows EXE build error:", error);
     return res.status(500).send("Failed to generate Windows executable: " + error.message);
@@ -832,10 +859,15 @@ app.post("/api/generate-apk", async (req, res) => {
     // Compile real signed Android APK package with embedded icons
     const apkBuffer = await buildAndroidApk(url, safeName, cleanPkg, iconUrl);
 
-    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(safeName)}.apk"`);
+    const safeFilename = safeName.replace(/[^\w\-\.]/g, "_") || "app";
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition, Content-Length");
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}.apk"; filename*=UTF-8''${encodeURIComponent(safeName)}.apk`);
     res.setHeader("Content-Type", "application/vnd.android.package-archive");
-    res.setHeader("Content-Length", apkBuffer.length);
-    return res.send(apkBuffer);
+    res.setHeader("Content-Length", apkBuffer.length.toString());
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    return res.end(apkBuffer);
   } catch (error: any) {
     console.error("Android APK build error:", error);
     return res.status(500).send("Failed to generate Android APK: " + error.message);
@@ -856,20 +888,28 @@ app.get("/api/download-app", async (req, res) => {
     if (!url) return res.status(400).send("URL parameter is required");
 
     const safeName = (appName || "WebApp").replace(/[^a-zA-Z0-9_\- ]/g, "").trim() || "WebApp";
+    const safeFilename = safeName.replace(/[^\w\-\.]/g, "_") || "app";
+
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition, Content-Length");
 
     if (type === "apk") {
       const cleanPkg = packageId || `com.echo.${safeName.toLowerCase().replace(/[^a-z0-9]/g, "") || "app"}`;
       const apkBuffer = await buildAndroidApk(url, safeName, cleanPkg, iconUrl);
-      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(safeName)}.apk"`);
+      res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}.apk"; filename*=UTF-8''${encodeURIComponent(safeName)}.apk`);
       res.setHeader("Content-Type", "application/vnd.android.package-archive");
-      res.setHeader("Content-Length", apkBuffer.length);
-      return res.send(apkBuffer);
+      res.setHeader("Content-Length", apkBuffer.length.toString());
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      return res.end(apkBuffer);
     } else {
       const exeBuffer = await buildWindowsExe(url, safeName, iconUrl);
-      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(safeName)}.exe"`);
-      res.setHeader("Content-Type", "application/vnd.microsoft.portable-executable");
-      res.setHeader("Content-Length", exeBuffer.length);
-      return res.send(exeBuffer);
+      res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}.exe"; filename*=UTF-8''${encodeURIComponent(safeName)}.exe`);
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.setHeader("Content-Length", exeBuffer.length.toString());
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      return res.end(exeBuffer);
     }
   } catch (error: any) {
     console.error("Direct download error:", error);

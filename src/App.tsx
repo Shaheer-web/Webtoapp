@@ -12,6 +12,7 @@ import {
   Loader2,
   Check,
   RefreshCw,
+  Globe,
 } from "lucide-react";
 import { AppProject, DashboardView, DownloadNotification, ECHO_LOGO_URL } from "./types";
 import { Sidebar } from "./components/Sidebar";
@@ -21,6 +22,7 @@ import { QuickAppModal } from "./components/QuickAppModal";
 import { BuildDownloadModal } from "./components/BuildDownloadModal";
 import { EditAppModal } from "./components/EditAppModal";
 import { DownloadNotificationToast } from "./components/DownloadNotificationToast";
+import { detectWebsiteBrand, getWebsiteFaviconUrl, getWebsiteFallbackIcon } from "./utils/iconHelper";
 
 // Initial apps: strictly empty by default (no pre-added apps)
 const INITIAL_APPS: AppProject[] = [];
@@ -150,6 +152,16 @@ export default function App() {
     const val = e.target.value;
     setQuickUrl(val);
 
+    // Instant brand and website picture recognition
+    const brand = detectWebsiteBrand(val);
+    if (brand) {
+      if (!userEditedQuickNameRef.current || !quickName.trim()) {
+        setQuickName(brand.name);
+      }
+      setQuickIconUrl(brand.faviconUrl);
+      setQuickDetected(true);
+    }
+
     if (quickDebounceRef.current) {
       clearTimeout(quickDebounceRef.current);
     }
@@ -157,13 +169,22 @@ export default function App() {
     if (val.trim().includes(".")) {
       quickDebounceRef.current = setTimeout(() => {
         detectQuickMetadata(val, false);
-      }, 350);
+      }, 300);
     }
   };
 
   const handleQuickUrlPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     const pasted = e.clipboardData.getData("text");
     if (pasted) {
+      const brand = detectWebsiteBrand(pasted);
+      if (brand) {
+        if (!userEditedQuickNameRef.current || !quickName.trim()) {
+          setQuickName(brand.name);
+        }
+        setQuickIconUrl(brand.faviconUrl);
+        setQuickDetected(true);
+      }
+
       if (quickDebounceRef.current) {
         clearTimeout(quickDebounceRef.current);
       }
@@ -192,17 +213,24 @@ export default function App() {
     let finalName = quickName.trim();
     if (!finalName) {
       try {
-        finalName = new URL(validUrl).hostname;
+        const brand = detectWebsiteBrand(validUrl);
+        if (brand) {
+          finalName = brand.name;
+        } else {
+          finalName = new URL(validUrl).hostname;
+        }
       } catch {
         finalName = "Web App";
       }
     }
 
+    const autoDetectedIcon = getWebsiteFaviconUrl(validUrl) || getWebsiteFallbackIcon(validUrl);
+
     const newApp: AppProject = {
       id: `${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
       name: finalName,
       url: validUrl,
-      iconUrl: quickIconUrl.trim() || ECHO_LOGO_URL,
+      iconUrl: quickIconUrl.trim() || autoDetectedIcon,
       description: "Official converted application",
       status: "completed",
       buildCount: 1,
@@ -427,13 +455,13 @@ export default function App() {
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
                         quickIconUrl
                           ? "text-emerald-700 bg-emerald-50 border-emerald-200"
-                          : "text-sky-600 bg-sky-50 border-sky-200"
+                          : "text-slate-600 bg-slate-50 border-slate-200"
                       }`}>
                         {quickValidating
-                          ? "Fetching logo..."
+                          ? "Fetching website picture..."
                           : quickIconUrl
-                          ? "Official Logo Detected"
-                          : "Echo Pre-Logo (Default)"}
+                          ? "Website Picture Auto-Detected"
+                          : "Auto-detects from URL"}
                       </span>
                     </div>
                     <div className="flex items-center space-x-3">
@@ -442,14 +470,23 @@ export default function App() {
                           ? "border-sky-400 ring-2 ring-sky-300 animate-pulse bg-sky-50/50"
                           : "border-slate-200"
                       }`}>
-                        <img
-                          src={quickIconUrl || ECHO_LOGO_URL}
-                          alt="App Icon"
-                          className="w-full h-full object-contain rounded-lg"
-                          onError={(e) => {
-                            (e.target as HTMLImageElement).src = ECHO_LOGO_URL;
-                          }}
-                        />
+                        {quickIconUrl ? (
+                          <img
+                            src={quickIconUrl}
+                            alt="Website Icon"
+                            className="w-full h-full object-contain rounded-lg"
+                            onError={(e) => {
+                              const fb = getWebsiteFallbackIcon(quickUrl);
+                              if (fb && (e.target as HTMLImageElement).src !== fb) {
+                                (e.target as HTMLImageElement).src = fb;
+                              }
+                            }}
+                          />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center text-slate-400">
+                            <Globe className="w-5 h-5 stroke-[1.5]" />
+                          </div>
+                        )}
                       </div>
                       <input
                         type="text"

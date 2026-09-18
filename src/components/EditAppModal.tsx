@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { X, Trash2, Save, Globe } from "lucide-react";
-import { AppProject, ECHO_LOGO_URL } from "../types";
+import { AppProject } from "../types";
+import { getWebsiteFaviconUrl, getWebsiteFallbackIcon } from "../utils/iconHelper";
 
 interface EditAppModalProps {
   app: AppProject | null;
@@ -34,15 +35,19 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({
 
   if (!isOpen || !app) return null;
 
+  const activeWebsiteIcon = iconUrl || getWebsiteFaviconUrl(url) || getWebsiteFallbackIcon(url);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !url.trim()) return;
+
+    const finalIcon = iconUrl.trim() || getWebsiteFaviconUrl(url.trim()) || getWebsiteFallbackIcon(url.trim());
 
     onSave({
       ...app,
       name: name.trim(),
       url: url.trim(),
-      iconUrl: iconUrl.trim() || ECHO_LOGO_URL,
+      iconUrl: finalIcon,
       description: description.trim() || undefined,
     });
     onClose();
@@ -93,24 +98,30 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({
               <label className="block text-xs font-bold text-slate-700 uppercase">
                 App Icon
               </label>
-              <span className="text-[10px] text-sky-600 bg-sky-50 px-1.5 py-0.5 rounded border border-sky-200">
-                {iconUrl ? "Custom Logo" : "Echo Pre-Logo (Default)"}
+              <span className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                {iconUrl ? "Custom Logo" : "Website Picture Auto-Detected"}
               </span>
             </div>
             <div className="flex items-center space-x-2.5">
-              <img
-                src={iconUrl || ECHO_LOGO_URL}
-                alt="Logo preview"
-                className="w-9 h-9 rounded-lg object-contain bg-slate-50 border border-slate-200 p-0.5"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = ECHO_LOGO_URL;
-                }}
-              />
+              {activeWebsiteIcon ? (
+                <img
+                  src={activeWebsiteIcon}
+                  alt="Logo preview"
+                  className="w-9 h-9 rounded-lg object-contain bg-slate-50 border border-slate-200 p-0.5"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = getWebsiteFallbackIcon(url);
+                  }}
+                />
+              ) : (
+                <div className="w-9 h-9 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400">
+                  <Globe className="w-4 h-4" />
+                </div>
+              )}
               <input
                 type="text"
                 value={iconUrl}
                 onChange={(e) => setIconUrl(e.target.value)}
-                placeholder="Icon URL (leave empty for Echo pre-logo)"
+                placeholder="Icon URL (leave empty to auto-detect from website)"
                 className="flex-1 px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
               />
             </div>

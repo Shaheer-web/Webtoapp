@@ -11,7 +11,8 @@ import {
   Monitor,
   Smartphone
 } from "lucide-react";
-import { AppProject, ECHO_LOGO_URL } from "../types";
+import { AppProject } from "../types";
+import { detectWebsiteBrand, getWebsiteFaviconUrl, getWebsiteFallbackIcon } from "../utils/iconHelper";
 
 interface QuickAppModalProps {
   isOpen: boolean;
@@ -94,10 +95,22 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
     }
   }, [name]);
 
-  // Trigger on typing with debounce
+  // Trigger on typing with instant brand detection + debounced deep probe
   const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newVal = e.target.value;
     setUrl(newVal);
+
+    // Instant local domain/brand check
+    const brand = detectWebsiteBrand(newVal);
+    if (brand) {
+      if (!userEditedNameRef.current || !name.trim()) {
+        setName(brand.name);
+      }
+      if (!userEditedIconRef.current) {
+        setIconUrl(brand.faviconUrl);
+      }
+      setDetectedSuccess(true);
+    }
 
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
@@ -106,7 +119,7 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
     if (newVal.trim().includes(".")) {
       debounceTimerRef.current = setTimeout(() => {
         detectMetadata(newVal, false);
-      }, 350);
+      }, 300);
     }
   };
 
@@ -114,6 +127,17 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
   const handleUrlPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     const pastedText = e.clipboardData.getData("text");
     if (pastedText) {
+      const brand = detectWebsiteBrand(pastedText);
+      if (brand) {
+        if (!userEditedNameRef.current || !name.trim()) {
+          setName(brand.name);
+        }
+        if (!userEditedIconRef.current) {
+          setIconUrl(brand.faviconUrl);
+        }
+        setDetectedSuccess(true);
+      }
+
       if (debounceTimerRef.current) {
         clearTimeout(debounceTimerRef.current);
       }
@@ -163,18 +187,25 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
     let finalName = name.trim();
     if (!finalName) {
       try {
-        const h = new URL(validUrl).hostname.replace(/^www\./i, "");
-        finalName = h.charAt(0).toUpperCase() + h.slice(1).split(".")[0];
+        const brand = detectWebsiteBrand(validUrl);
+        if (brand) {
+          finalName = brand.name;
+        } else {
+          const h = new URL(validUrl).hostname.replace(/^www\./i, "");
+          finalName = h.charAt(0).toUpperCase() + h.slice(1).split(".")[0];
+        }
       } catch {
         finalName = "Web App";
       }
     }
 
+    const autoDetectedIcon = getWebsiteFaviconUrl(validUrl) || getWebsiteFallbackIcon(validUrl);
+
     const newApp: AppProject = {
       id: `${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
       name: finalName,
       url: validUrl,
-      iconUrl: iconUrl.trim() || `https://www.google.com/s2/favicons?domain=${new URL(validUrl).hostname}&sz=256`,
+      iconUrl: iconUrl.trim() || autoDetectedIcon,
       description: description.trim() || undefined,
       status: "completed",
       buildCount: 1,
@@ -310,13 +341,13 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
               <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
                 iconUrl
                   ? "text-emerald-700 bg-emerald-50 border-emerald-200"
-                  : "text-sky-600 bg-sky-50 border-sky-200"
+                  : "text-slate-600 bg-slate-50 border-slate-200"
               }`}>
                 {isValidating
-                  ? "Fetching logo..."
+                  ? "Fetching website picture..."
                   : iconUrl
-                  ? (userEditedIconRef.current ? "Custom Icon" : "Official Logo Detected")
-                  : "Echo Pre-Logo (Default)"}
+                  ? (userEditedIconRef.current ? "Custom Icon" : "Website Picture Auto-Detected")
+                  : "Auto-detects from URL"}
               </span>
             </div>
             <div className="flex items-center space-x-3">
@@ -325,14 +356,23 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
                   ? "border-sky-400 ring-2 ring-sky-300 animate-pulse bg-sky-50/50"
                   : "border-slate-200"
               }`}>
-                <img
-                  src={iconUrl || ECHO_LOGO_URL}
-                  alt="App Icon"
-                  className="w-full h-full object-contain rounded-lg"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = ECHO_LOGO_URL;
-                  }}
-                />
+                {iconUrl ? (
+                  <img
+                    src={iconUrl}
+                    alt="App Icon"
+                    className="w-full h-full object-contain rounded-lg"
+                    onError={(e) => {
+                      const fb = getWebsiteFallbackIcon(url);
+                      if (fb && (e.target as HTMLImageElement).src !== fb) {
+                        (e.target as HTMLImageElement).src = fb;
+                      }
+                    }}
+                  />
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-slate-400">
+                    <Globe className="w-6 h-6 stroke-[1.5]" />
+                  </div>
+                )}
               </div>
 
               <div className="flex-1 space-y-1">

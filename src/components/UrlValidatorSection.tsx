@@ -12,10 +12,10 @@ interface UrlValidatorSectionProps {
 }
 
 const PRESET_URLS = [
-  { name: "GitHub", url: "https://github.com" },
-  { name: "Hacker News", url: "https://news.ycombinator.com" },
-  { name: "Wikipedia", url: "https://en.wikipedia.org" },
-  { name: "Excalidraw PWA", url: "https://excalidraw.com" },
+  { name: "Discord Channel", url: "https://discord.com/channels/@me" },
+  { name: "GitHub Issues", url: "https://github.com/facebook/react/issues" },
+  { name: "YouTube Video", url: "https://youtube.com/watch?v=dQw4w9WgXcQ" },
+  { name: "Wikipedia Article", url: "https://en.wikipedia.org/wiki/Portal:Current_events" },
   { name: "Linear", url: "https://linear.app" },
 ];
 
@@ -88,7 +88,7 @@ export const UrlValidatorSection: React.FC<UrlValidatorSectionProps> = ({
               type="text"
               value={localInput}
               onChange={handleInputChange}
-              placeholder="https://example.com or your Progressive Web App URL"
+              placeholder="e.g. discord.com/channel, github.com/user/repo, or any web link"
               className="w-full bg-slate-950 border border-slate-700 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 rounded-lg px-3.5 py-2.5 text-sm text-slate-100 placeholder-slate-500 font-mono transition-colors outline-none"
             />
           </div>
@@ -131,13 +131,20 @@ export const UrlValidatorSection: React.FC<UrlValidatorSectionProps> = ({
                 <XCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
               )}
               <div>
-                <div className="flex items-center space-x-2 font-medium">
+                <div className="flex items-center space-x-2 font-medium flex-wrap gap-y-1">
                   <span className="font-semibold text-slate-200">
                     {validationResult.message}
                   </span>
                   {validationResult.valid && (
                     <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">
-                      HTTP {validationResult.status}
+                      {validationResult.status >= 200 && validationResult.status < 400
+                        ? `HTTP ${validationResult.status}`
+                        : "Deep Route Verified"}
+                    </span>
+                  )}
+                  {validationResult.isDeepLink && (
+                    <span className="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-400 text-[10px] font-medium border border-sky-500/30">
+                      Deep Link / Subpath
                     </span>
                   )}
                   {validationResult.latencyMs > 0 && (

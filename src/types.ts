@@ -18,6 +18,9 @@ export interface UrlValidationResult {
   status: number;
   statusText?: string;
   finalUrl?: string;
+  targetUrl?: string;
+  isDeepLink?: boolean;
+  pathname?: string;
   latencyMs: number;
   ssl?: boolean;
   title?: string;

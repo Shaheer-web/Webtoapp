@@ -360,7 +360,7 @@ export default function App() {
                           Auto-detected!
                         </span>
                       ) : (
-                        <span className="text-[10px] text-slate-400">Paste any website link or domain</span>
+                        <span className="text-[10px] text-slate-400">Any URL or deep link (e.g. discord.com/channel)</span>
                       )}
                     </div>
                     <div className="relative">
@@ -371,7 +371,7 @@ export default function App() {
                         onChange={handleQuickUrlChange}
                         onPaste={handleQuickUrlPaste}
                         onBlur={handleQuickUrlBlur}
-                        placeholder="Paste link: e.g. discord.com, youtube.com, github.com"
+                        placeholder="Paste link: e.g. discord.com/channel, youtube.com/watch?v=..., github.com"
                         className="w-full pl-4 pr-10 py-3 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
                       />
                       <div className="absolute right-3.5 top-3.5 flex items-center">
@@ -390,7 +390,7 @@ export default function App() {
                       </div>
                     </div>
                     <p className="text-[11px] text-slate-500">
-                      Instant auto-detection: paste any link and we automatically fetch the official name &amp; logo!
+                      Instant deep link support: enter any URL or subpath (e.g. discord.com/channel) and we convert it directly into your native desktop &amp; mobile app!
                     </p>
                   </div>
 

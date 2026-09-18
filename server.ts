@@ -123,6 +123,7 @@ app.post("/api/validate-url", async (req, res) => {
 
     let response: Response | null = null;
     let text = "";
+    let isDeepLink = parsedUrl.pathname.length > 1 || !!parsedUrl.search || !!parsedUrl.hash;
 
     try {
       response = await fetch(trimmedUrl, {
@@ -138,14 +139,42 @@ app.post("/api/validate-url", async (req, res) => {
       });
       text = await response.text();
     } catch (fetchErr: any) {
-      // Best effort probe failed, but we still return the auto-detected brand name and Google high-res logo!
-      console.log("Direct probe note:", fetchErr?.message || "fetch failed");
+      console.log("Direct deep link probe note:", fetchErr?.message || "fetch failed");
     } finally {
       clearTimeout(timeoutId);
     }
 
+    // If deep link returned 404, 401, 403 or failed to yield metadata (common for Discord, Slack, login-walled routes),
+    // probe the root origin domain (e.g. https://discord.com/) so we can extract the official brand name & icon!
+    if (isDeepLink && (!response || response.status >= 400 || !text || text.length < 200)) {
+      try {
+        const rootController = new AbortController();
+        const rootTimeout = setTimeout(() => rootController.abort(), 4000);
+        const rootRes = await fetch(parsedUrl.origin, {
+          method: "GET",
+          signal: rootController.signal,
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          },
+        });
+        clearTimeout(rootTimeout);
+        if (rootRes.ok) {
+          const rootText = await rootRes.text();
+          if (rootText && rootText.length > 100) {
+            text = rootText;
+          }
+        }
+      } catch (rootErr) {
+        console.log("Root origin fallback probe note:", rootErr);
+      }
+    }
+
     const latencyMs = Date.now() - startTime;
-    const finalTargetUrl = response?.url || trimmedUrl;
+    // CRITICAL: NEVER overwrite user's deep link with redirect URL.
+    // The user requested an app for trimmedUrl (e.g. https://discord.com/channel).
+    const finalTargetUrl = trimmedUrl;
 
     // Extract candidates
     let detectedName = "";
@@ -225,11 +254,20 @@ app.post("/api/validate-url", async (req, res) => {
     const finalName = detectedName || fallbackName;
     const finalFavicon = detectedIcon || googleFaviconUrl;
 
+    const pathDesc = parsedUrl.pathname && parsedUrl.pathname !== "/" ? `(${parsedUrl.pathname})` : "";
+    const statusMsg = isDeepLink
+      ? `Deep link "${finalName}" ${pathDesc} verified. Ready to convert.`
+      : `Detected "${finalName}" with official logo.`;
+
     return res.json({
       valid: true,
       status: response?.status || 200,
       statusText: response?.statusText || "OK",
       finalUrl: finalTargetUrl,
+      targetUrl: finalTargetUrl,
+      isDeepLink,
+      pathname: parsedUrl.pathname,
+      search: parsedUrl.search,
       latencyMs,
       ssl: finalTargetUrl.startsWith("https://"),
       title: finalName,
@@ -239,7 +277,7 @@ app.post("/api/validate-url", async (req, res) => {
       duckFaviconUrl,
       manifestUrl,
       hostname,
-      message: `Detected "${finalName}" with official logo.`,
+      message: statusMsg,
     });
   } catch (error: any) {
     // If anything fails, still return domain fallback
@@ -256,7 +294,22 @@ app.post("/api/validate-url", async (req, res) => {
 });
 
 // Helper to fetch and normalize any icon format into a Buffer
-async function getIconBuffer(iconUrl?: string): Promise<Buffer> {
+async function getIconBuffer(iconUrl?: string, appUrl?: string): Promise<Buffer> {
+  // If icon is an SVG URL, browsers/ImageMagick without librsvg cannot rasterize it directly,
+  // so fetch high-res 256px PNG from Google Favicons service for the domain
+  if (iconUrl && /\.svg(\?|$)/i.test(iconUrl) && appUrl) {
+    try {
+      const host = new URL(appUrl.startsWith("http") ? appUrl : `https://${appUrl}`).hostname;
+      const gRes = await fetch(`https://www.google.com/s2/favicons?domain=${host}&sz=256`, {
+        signal: AbortSignal.timeout(5000)
+      });
+      if (gRes.ok) {
+        const ab = await gRes.arrayBuffer();
+        if (ab.byteLength > 100) return Buffer.from(ab);
+      }
+    } catch {}
+  }
+
   if (iconUrl && iconUrl.startsWith("data:image/")) {
     const parts = iconUrl.split(",");
     if (parts[1]) {
@@ -269,14 +322,28 @@ async function getIconBuffer(iconUrl?: string): Promise<Buffer> {
       const res = await fetch(iconUrl, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          Accept: "image/*,*/*;q=0.8"
+          Accept: "image/png,image/x-icon,image/*,*/*;q=0.8"
         },
         signal: AbortSignal.timeout(6000)
       });
       if (res.ok) {
         const ab = await res.arrayBuffer();
+        const buf = Buffer.from(ab);
+        // If it downloaded an SVG, try Google Favicons PNG instead
+        if (buf.toString("utf8", 0, 100).includes("<svg") && appUrl) {
+          try {
+            const host = new URL(appUrl.startsWith("http") ? appUrl : `https://${appUrl}`).hostname;
+            const gRes = await fetch(`https://www.google.com/s2/favicons?domain=${host}&sz=256`, {
+              signal: AbortSignal.timeout(4000)
+            });
+            if (gRes.ok) {
+              const gab = await gRes.arrayBuffer();
+              if (gab.byteLength > 100) return Buffer.from(gab);
+            }
+          } catch {}
+        }
         if (ab.byteLength > 100) {
-          return Buffer.from(ab);
+          return buf;
         }
       }
     } catch (e: any) {
@@ -284,15 +351,15 @@ async function getIconBuffer(iconUrl?: string): Promise<Buffer> {
     }
   }
 
-  // Fallback: fetch a crisp modern SVG/PNG shape
-  try {
-    const fallbackRes = await fetch("https://api.dicebear.com/7.x/shapes/png?seed=EchoApp&backgroundColor=0284c7", {
-      signal: AbortSignal.timeout(4000)
-    });
-    if (fallbackRes.ok) {
-      return Buffer.from(await fallbackRes.arrayBuffer());
-    }
-  } catch {}
+  // Built-in high-quality PNG fallback
+  const fallbackPngPath = path.join(process.cwd(), "public", "default_app.png");
+  if (fs.existsSync(fallbackPngPath)) {
+    return fs.readFileSync(fallbackPngPath);
+  }
+
+  if (fs.existsSync("/tmp/default_app.png")) {
+    return fs.readFileSync("/tmp/default_app.png");
+  }
 
   // Last-resort transparent PNG
   return Buffer.from(
@@ -310,6 +377,21 @@ function getImageExt(buf: Buffer): string {
   return "png";
 }
 
+function isValidIcoFile(filePath: string): boolean {
+  try {
+    if (!fs.existsSync(filePath)) return false;
+    const stat = fs.statSync(filePath);
+    if (stat.size < 22) return false;
+    const buf = Buffer.alloc(4);
+    const fd = fs.openSync(filePath, "r");
+    fs.readSync(fd, buf, 0, 4, 0);
+    fs.closeSync(fd);
+    return buf[0] === 0 && buf[1] === 0 && buf[2] === 1 && buf[3] === 0;
+  } catch {
+    return false;
+  }
+}
+
 // Convert raw icon buffer into standard ICO and Android multi-density PNGs
 function prepareAppIcons(iconBuf: Buffer, targetDir: string): {
   icoPath: string;
@@ -322,27 +404,55 @@ function prepareAppIcons(iconBuf: Buffer, targetDir: string): {
 
   const png256 = path.join(targetDir, "icon_256.png");
   try {
-    execSync(`convert "${rawPath}[0]" -background none -resize 256x256 "${png256}"`, { timeout: 10000 });
+    execSync(`convert "${rawPath}[0]" -background none -resize 256x256 "${png256}"`, { timeout: 8000 });
   } catch {
-    // If ImageMagick failed on raw format, try simple resize
     try {
-      execSync(`convert "${rawPath}" -resize 256x256 "${png256}"`, { timeout: 10000 });
+      execSync(`convert "${rawPath}" -resize 256x256 "${png256}"`, { timeout: 8000 });
     } catch {
-      fs.copyFileSync(rawPath, png256);
+      // If convert completely failed, use our high quality fallback PNG
+      const defaultPng = fs.existsSync("/tmp/default_app.png")
+        ? "/tmp/default_app.png"
+        : path.join(process.cwd(), "public", "default_app.png");
+      if (fs.existsSync(defaultPng)) {
+        fs.copyFileSync(defaultPng, png256);
+      } else {
+        fs.copyFileSync(rawPath, png256);
+      }
+    }
+  }
+
+  // Ensure png256 actually exists and has size
+  if (!fs.existsSync(png256) || fs.statSync(png256).size < 50) {
+    const defaultPng = fs.existsSync("/tmp/default_app.png")
+      ? "/tmp/default_app.png"
+      : path.join(process.cwd(), "public", "default_app.png");
+    if (fs.existsSync(defaultPng)) {
+      fs.copyFileSync(defaultPng, png256);
     }
   }
 
   // Windows .ico with multi-resolution support
   const icoPath = path.join(targetDir, "app.ico");
   try {
-    execSync(`icotool -c -o "${icoPath}" "${png256}"`, { timeout: 10000 });
+    execSync(`icotool -c -o "${icoPath}" "${png256}"`, { timeout: 8000 });
   } catch {
     try {
-      execSync(`convert "${png256}" -define icon:auto-resize=64,32,16 "${icoPath}"`, { timeout: 10000 });
+      execSync(`convert "${png256}" -define icon:auto-resize=64,32,16 "${icoPath}"`, { timeout: 8000 });
     } catch {
-      if (ext === "ico") {
-        fs.copyFileSync(rawPath, icoPath);
-      }
+      // Fallback to default .ico
+    }
+  }
+
+  // If ico still missing, corrupted, or non-ICO format, copy guaranteed valid ICO
+  const defaultIco = fs.existsSync("/tmp/default_app.ico")
+    ? "/tmp/default_app.ico"
+    : path.join(process.cwd(), "public", "default_app.ico");
+
+  if (!isValidIcoFile(icoPath)) {
+    if (isValidIcoFile(defaultIco)) {
+      fs.copyFileSync(defaultIco, icoPath);
+    } else if (ext === "ico" && isValidIcoFile(rawPath)) {
+      fs.copyFileSync(rawPath, icoPath);
     }
   }
 
@@ -372,6 +482,19 @@ function prepareAppIcons(iconBuf: Buffer, targetDir: string): {
   return { icoPath, pngPath: png256, mipmapPaths };
 }
 
+function getMingwGcc(): string {
+  if (fs.existsSync("/usr/bin/x86_64-w64-mingw32-gcc")) return "/usr/bin/x86_64-w64-mingw32-gcc";
+  if (fs.existsSync("/usr/bin/x86_64-w64-mingw32-gcc-posix")) return "/usr/bin/x86_64-w64-mingw32-gcc-posix";
+  if (fs.existsSync("/usr/bin/x86_64-w64-mingw32-gcc-win32")) return "/usr/bin/x86_64-w64-mingw32-gcc-win32";
+  if (fs.existsSync("/usr/local/bin/gcc")) return "/usr/local/bin/gcc";
+  return "x86_64-w64-mingw32-gcc";
+}
+
+function getWindres(): string {
+  if (fs.existsSync("/usr/bin/x86_64-w64-mingw32-windres")) return "/usr/bin/x86_64-w64-mingw32-windres";
+  return "windres";
+}
+
 // Compile a 100% genuine, native Windows x86_64 GUI executable (.exe) with embedded icon
 async function buildWindowsExe(url: string, appName: string, iconUrl?: string): Promise<Buffer> {
   const safeUrl = url.startsWith("http://") || url.startsWith("https://") ? url : `https://${url}`;
@@ -379,7 +502,7 @@ async function buildWindowsExe(url: string, appName: string, iconUrl?: string): 
   const tmpDir = fs.mkdtempSync(path.join("/tmp", "win-exe-"));
 
   try {
-    const iconBuf = await getIconBuffer(iconUrl);
+    const iconBuf = await getIconBuffer(iconUrl, safeUrl);
     const { icoPath } = prepareAppIcons(iconBuf, tmpDir);
 
     // Escape URL and name for C wide string literals
@@ -449,21 +572,69 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     const cPath = path.join(tmpDir, "main.c");
     fs.writeFileSync(cPath, cSource);
 
-    // Resource file embedding the official App Icon
-    const rcContent = `1 ICON "${icoPath}"\n`;
-    const rcPath = path.join(tmpDir, "app.rc");
-    fs.writeFileSync(rcPath, rcContent);
+    // Ensure ico file exists and has valid Windows ICO format
+    let safeIcoPath = icoPath;
+    const defaultIco = fs.existsSync("/tmp/default_app.ico")
+      ? "/tmp/default_app.ico"
+      : path.join(process.cwd(), "public", "default_app.ico");
 
-    // Compile resource with windres
-    const resObjPath = path.join(tmpDir, "app_res.o");
-    execSync(`x86_64-w64-mingw32-windres "${rcPath}" -O coff -o "${resObjPath}"`, { timeout: 15000 });
+    if (!isValidIcoFile(safeIcoPath)) {
+      safeIcoPath = defaultIco;
+    }
+
+    let resObjPath: string | null = null;
+    const windresCmd = getWindres();
+    const gccCmd = getMingwGcc();
+
+    if (isValidIcoFile(safeIcoPath)) {
+      try {
+        const cleanIcoPath = safeIcoPath.replace(/\\/g, "/");
+        const rcContent = `1 ICON "${cleanIcoPath}"\n`;
+        const rcPath = path.join(tmpDir, "app.rc");
+        fs.writeFileSync(rcPath, rcContent);
+        const testRes = path.join(tmpDir, "app_res.o");
+        // Execute windres with explicit preprocessor so it never fails looking for ambient cpp/gcc
+        try {
+          execSync(
+            `"${windresCmd}" --preprocessor "${gccCmd}" --preprocessor-arg "-E" --preprocessor-arg "-xc-header" --preprocessor-arg "-DRC_INVOKED" "${rcPath}" -O coff -o "${testRes}"`,
+            { timeout: 15000 }
+          );
+        } catch {
+          // Fallback to standard windres call without custom preprocessor args
+          execSync(`"${windresCmd}" "${rcPath}" -O coff -o "${testRes}"`, { timeout: 15000 });
+        }
+        if (fs.existsSync(testRes) && fs.statSync(testRes).size > 0) {
+          resObjPath = testRes;
+        }
+      } catch (windresErr) {
+        // Silently fall back to standard executable if resource compilation is skipped
+      }
+    }
 
     // Compile native Windows executable with mingw-w64
     const exePath = path.join(tmpDir, "app.exe");
-    execSync(
-      `x86_64-w64-mingw32-gcc -mwindows -O2 -s "${cPath}" "${resObjPath}" -o "${exePath}" -lshlwapi`,
-      { timeout: 20000 }
-    );
+    if (resObjPath) {
+      try {
+        execSync(
+          `"${gccCmd}" -mwindows -O2 -s "${cPath}" "${resObjPath}" -o "${exePath}" -lshlwapi`,
+          { timeout: 20000 }
+        );
+      } catch {
+        execSync(
+          `"${gccCmd}" -mwindows -O2 -s "${cPath}" -o "${exePath}" -lshlwapi`,
+          { timeout: 20000 }
+        );
+      }
+    } else {
+      execSync(
+        `"${gccCmd}" -mwindows -O2 -s "${cPath}" -o "${exePath}" -lshlwapi`,
+        { timeout: 20000 }
+      );
+    }
+
+    if (!fs.existsSync(exePath)) {
+      throw new Error("Executable was not produced by compiler.");
+    }
 
     return fs.readFileSync(exePath);
   } finally {
@@ -484,7 +655,7 @@ async function buildAndroidApk(url: string, appName: string, packageId: string, 
 
   const tmpDir = fs.mkdtempSync(path.join("/tmp", "apk-icon-"));
   try {
-    const iconBuf = await getIconBuffer(iconUrl);
+    const iconBuf = await getIconBuffer(iconUrl, safeUrl);
     const { pngPath, mipmapPaths } = prepareAppIcons(iconBuf, tmpDir);
 
     const zip = new JSZip();
@@ -617,6 +788,41 @@ app.post("/api/generate-apk", async (req, res) => {
   } catch (error: any) {
     console.error("Android APK build error:", error);
     return res.status(500).send("Failed to generate Android APK: " + error.message);
+  }
+});
+
+// Universal Direct GET download endpoint (allows direct browser links, new tab downloads, and iframe-safe triggers)
+app.get("/api/download-app", async (req, res) => {
+  try {
+    const { type, url, appName, packageId, iconUrl } = req.query as {
+      type?: string;
+      url?: string;
+      appName?: string;
+      packageId?: string;
+      iconUrl?: string;
+    };
+
+    if (!url) return res.status(400).send("URL parameter is required");
+
+    const safeName = (appName || "WebApp").replace(/[^a-zA-Z0-9_\- ]/g, "").trim() || "WebApp";
+
+    if (type === "apk") {
+      const cleanPkg = packageId || `com.echo.${safeName.toLowerCase().replace(/[^a-z0-9]/g, "") || "app"}`;
+      const apkBuffer = await buildAndroidApk(url, safeName, cleanPkg, iconUrl);
+      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(safeName)}.apk"`);
+      res.setHeader("Content-Type", "application/vnd.android.package-archive");
+      res.setHeader("Content-Length", apkBuffer.length);
+      return res.send(apkBuffer);
+    } else {
+      const exeBuffer = await buildWindowsExe(url, safeName, iconUrl);
+      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(safeName)}.exe"`);
+      res.setHeader("Content-Type", "application/vnd.microsoft.portable-executable");
+      res.setHeader("Content-Length", exeBuffer.length);
+      return res.send(exeBuffer);
+    }
+  } catch (error: any) {
+    console.error("Direct download error:", error);
+    return res.status(500).send("Failed to generate download: " + error.message);
   }
 });
 

@@ -72,10 +72,13 @@ export const BuildDownloadModal: React.FC<BuildDownloadModalProps> = ({
       const a = document.createElement("a");
       a.href = downloadUrl;
       a.download = fileName;
+      a.target = "_blank";
       document.body.appendChild(a);
       a.click();
-      a.remove();
-      window.URL.revokeObjectURL(downloadUrl);
+      setTimeout(() => {
+        a.remove();
+        window.URL.revokeObjectURL(downloadUrl);
+      }, 2000);
 
       onBuildSuccess(app.id);
 
@@ -90,19 +93,47 @@ export const BuildDownloadModal: React.FC<BuildDownloadModalProps> = ({
         });
       }
     } catch (err: any) {
-      if (onNotify) {
-        onNotify({
-          type: "error",
-          title: "Download Failed",
-          message: err.message || "Failed to download app binary",
-          appName: cleanName,
-          format: formatLabel,
-        });
+      console.warn("Primary download encountered issue, invoking direct fallback link:", err);
+      // Fallback: direct GET route that forces browser-level attachment download
+      try {
+        const fallbackUrl = `/api/download-app?type=${type}&url=${encodeURIComponent(app.url)}&appName=${encodeURIComponent(cleanName)}&iconUrl=${encodeURIComponent(app.iconUrl || "")}`;
+        const fallbackA = document.createElement("a");
+        fallbackA.href = fallbackUrl;
+        fallbackA.download = type === "exe" ? `${cleanName}.exe` : `${cleanName}.apk`;
+        fallbackA.target = "_blank";
+        document.body.appendChild(fallbackA);
+        fallbackA.click();
+        setTimeout(() => fallbackA.remove(), 1500);
+
+        onBuildSuccess(app.id);
+
+        if (onNotify) {
+          onNotify({
+            type: "completed",
+            title: `Download Started`,
+            message: `${cleanName} (${formatLabel}) download triggered directly. Please check your browser downloads folder!`,
+            appName: cleanName,
+            format: formatLabel,
+          });
+        }
+      } catch (fallbackErr: any) {
+        if (onNotify) {
+          onNotify({
+            type: "error",
+            title: "Download Issue",
+            message: err.message || "Failed to download app binary. Please use the direct link below.",
+            appName: cleanName,
+            format: formatLabel,
+          });
+        }
       }
     } finally {
       setDownloading(null);
     }
   };
+
+  const directExeUrl = `/api/download-app?type=exe&url=${encodeURIComponent(app.url)}&appName=${encodeURIComponent(app.name || "WebApp")}&iconUrl=${encodeURIComponent(app.iconUrl || "")}`;
+  const directApkUrl = `/api/download-app?type=apk&url=${encodeURIComponent(app.url)}&appName=${encodeURIComponent(app.name || "WebApp")}&iconUrl=${encodeURIComponent(app.iconUrl || "")}`;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
@@ -180,6 +211,17 @@ export const BuildDownloadModal: React.FC<BuildDownloadModalProps> = ({
                 </>
               )}
             </button>
+            <div className="text-center">
+              <a
+                href={directExeUrl}
+                download={`${app.name || "WebApp"}.exe`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] text-slate-400 hover:text-sky-600 transition-colors inline-block"
+              >
+                Direct browser download link (if popup blocked)
+              </a>
+            </div>
           </div>
 
           {/* Action 2: Android .APK */}
@@ -216,6 +258,17 @@ export const BuildDownloadModal: React.FC<BuildDownloadModalProps> = ({
                 </>
               )}
             </button>
+            <div className="text-center">
+              <a
+                href={directApkUrl}
+                download={`${app.name || "WebApp"}.apk`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] text-slate-400 hover:text-emerald-600 transition-colors inline-block"
+              >
+                Direct browser download link (if popup blocked)
+              </a>
+            </div>
           </div>
 
           {/* Live Preview Link */}

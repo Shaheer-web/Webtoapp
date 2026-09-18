@@ -238,7 +238,7 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
                   Auto-detected!
                 </span>
               ) : (
-                <span className="text-[10px] text-slate-400">Paste any URL or domain</span>
+                <span className="text-[10px] text-slate-400">Any URL or deep link (e.g. discord.com/channel)</span>
               )}
             </div>
             <div className="relative">
@@ -252,7 +252,7 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
                 onChange={handleUrlChange}
                 onPaste={handleUrlPaste}
                 onBlur={handleUrlBlur}
-                placeholder="Paste link: e.g. discord.com, youtube.com, github.com"
+                placeholder="Paste link: e.g. discord.com/channel, youtube.com/watch?v=..., github.com"
                 className="w-full pl-9 pr-10 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
               />
               <div className="absolute right-3 top-3 flex items-center">

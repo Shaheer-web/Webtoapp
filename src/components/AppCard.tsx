@@ -14,6 +14,7 @@ interface AppCardProps {
 
 export const AppCard: React.FC<AppCardProps> = ({ app, onBuild, onSettings, onDelete, onNotify }) => {
   const [downloading, setDownloading] = useState<"exe" | "apk" | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const websiteIcon = app.iconUrl || getWebsiteFaviconUrl(app.url) || getWebsiteFallbackIcon(app.url);
 

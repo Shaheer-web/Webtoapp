@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Globe, Wrench, Settings, Clock, ExternalLink, Monitor, Smartphone, Download, Trash2, RefreshCw } from "lucide-react";
 import { AppProject, DownloadNotification, ECHO_LOGO_URL } from "../types";
+import { downloadFileBlob, triggerDirectDownload } from "../utils/downloadHelper";
 
 interface AppCardProps {
   app: AppProject;
@@ -17,6 +18,7 @@ export const AppCard: React.FC<AppCardProps> = ({ app, onBuild, onSettings, onDe
     setDownloading(type);
     const formatLabel = type === "exe" ? "EXE" : "APK";
     const cleanName = app.name.trim() || "WebApp";
+    const fileName = type === "exe" ? `${cleanName}.exe` : `${cleanName}.apk`;
 
     if (onNotify) {
       onNotify({
@@ -48,16 +50,7 @@ export const AppCard: React.FC<AppCardProps> = ({ app, onBuild, onSettings, onDe
       }
 
       const blob = await res.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
-      const fileName = type === "exe" ? `${cleanName}.exe` : `${cleanName}.apk`;
-      const a = document.createElement("a");
-      a.href = downloadUrl;
-      // Direct official file download (never zip)
-      a.download = fileName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(downloadUrl);
+      downloadFileBlob(blob, fileName);
 
       if (onNotify) {
         onNotify({
@@ -69,14 +62,30 @@ export const AppCard: React.FC<AppCardProps> = ({ app, onBuild, onSettings, onDe
         });
       }
     } catch (err: any) {
-      if (onNotify) {
-        onNotify({
-          type: "error",
-          title: "Download Failed",
-          message: err.message || "Failed to download app binary",
-          appName: cleanName,
-          format: formatLabel,
-        });
+      console.warn("Primary download encountered issue, invoking direct fallback link:", err);
+      try {
+        const fallbackUrl = `/api/download-app?type=${type}&url=${encodeURIComponent(app.url)}&appName=${encodeURIComponent(cleanName)}&iconUrl=${encodeURIComponent(app.iconUrl || "")}`;
+        triggerDirectDownload(fallbackUrl, fileName);
+
+        if (onNotify) {
+          onNotify({
+            type: "completed",
+            title: `Download Started`,
+            message: `${cleanName} (${formatLabel}) download triggered directly. Please check your browser downloads folder!`,
+            appName: cleanName,
+            format: formatLabel,
+          });
+        }
+      } catch (fallbackErr: any) {
+        if (onNotify) {
+          onNotify({
+            type: "error",
+            title: "Download Failed",
+            message: err.message || "Failed to download app binary",
+            appName: cleanName,
+            format: formatLabel,
+          });
+        }
       }
     } finally {
       setDownloading(null);

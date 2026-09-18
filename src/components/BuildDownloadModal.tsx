@@ -11,6 +11,7 @@ import {
   Globe
 } from "lucide-react";
 import { AppProject, DownloadNotification, ECHO_LOGO_URL } from "../types";
+import { downloadFileBlob, triggerDirectDownload } from "../utils/downloadHelper";
 
 interface BuildDownloadModalProps {
   app: AppProject | null;
@@ -67,18 +68,8 @@ export const BuildDownloadModal: React.FC<BuildDownloadModalProps> = ({
       }
 
       const blob = await res.blob();
-      const downloadUrl = window.URL.createObjectURL(blob);
       const fileName = type === "exe" ? `${cleanName}.exe` : `${cleanName}.apk`;
-      const a = document.createElement("a");
-      a.href = downloadUrl;
-      a.download = fileName;
-      a.target = "_blank";
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => {
-        a.remove();
-        window.URL.revokeObjectURL(downloadUrl);
-      }, 2000);
+      downloadFileBlob(blob, fileName);
 
       onBuildSuccess(app.id);
 
@@ -97,13 +88,8 @@ export const BuildDownloadModal: React.FC<BuildDownloadModalProps> = ({
       // Fallback: direct GET route that forces browser-level attachment download
       try {
         const fallbackUrl = `/api/download-app?type=${type}&url=${encodeURIComponent(app.url)}&appName=${encodeURIComponent(cleanName)}&iconUrl=${encodeURIComponent(app.iconUrl || "")}`;
-        const fallbackA = document.createElement("a");
-        fallbackA.href = fallbackUrl;
-        fallbackA.download = type === "exe" ? `${cleanName}.exe` : `${cleanName}.apk`;
-        fallbackA.target = "_blank";
-        document.body.appendChild(fallbackA);
-        fallbackA.click();
-        setTimeout(() => fallbackA.remove(), 1500);
+        const fileName = type === "exe" ? `${cleanName}.exe` : `${cleanName}.apk`;
+        triggerDirectDownload(fallbackUrl, fileName);
 
         onBuildSuccess(app.id);
 
@@ -215,8 +201,6 @@ export const BuildDownloadModal: React.FC<BuildDownloadModalProps> = ({
               <a
                 href={directExeUrl}
                 download={`${app.name || "WebApp"}.exe`}
-                target="_blank"
-                rel="noopener noreferrer"
                 className="text-[11px] text-slate-400 hover:text-sky-600 transition-colors inline-block"
               >
                 Direct browser download link (if popup blocked)
@@ -262,8 +246,6 @@ export const BuildDownloadModal: React.FC<BuildDownloadModalProps> = ({
               <a
                 href={directApkUrl}
                 download={`${app.name || "WebApp"}.apk`}
-                target="_blank"
-                rel="noopener noreferrer"
                 className="text-[11px] text-slate-400 hover:text-emerald-600 transition-colors inline-block"
               >
                 Direct browser download link (if popup blocked)

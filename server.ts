@@ -518,7 +518,7 @@ function getWindres(): string {
 }
 
 // Pure zero-dependency binary patching for pre-compiled native Windows PE32+ launcher template
-function patchExeTemplate(targetUrl: string): Buffer {
+function patchExeTemplate(targetUrl: string, appName: string = "WebApp"): Buffer {
   const possiblePaths = [
     path.join(process.cwd(), "public", "assets", "launcher_template.exe"),
     path.join(process.cwd(), "assets", "launcher_template.exe"),
@@ -550,16 +550,27 @@ function patchExeTemplate(targetUrl: string): Buffer {
 
   const urlBuf = Buffer.from(cleanTarget + "\0", "utf16le");
   const patched = Buffer.from(templateBuffer);
-  // Zero out the placeholder area (up to 4000 bytes)
+  // Zero out the URL placeholder area (up to 4000 bytes)
   patched.fill(0, idx, Math.min(idx + 4000, patched.length));
   urlBuf.copy(patched, idx);
+
+  // Also patch app name placeholder if present
+  const nameMarker = Buffer.from("__ECHO_APP_NAME_PLACEHOLDER_V1_", "utf16le");
+  const nameIdx = patched.indexOf(nameMarker);
+  if (nameIdx !== -1) {
+    const cleanName = (appName || "WebApp").slice(0, 64);
+    const nameBuf = Buffer.from(cleanName + "\0", "utf16le");
+    patched.fill(0, nameIdx, Math.min(nameIdx + 500, patched.length));
+    nameBuf.copy(patched, nameIdx);
+  }
+
   return patched;
 }
 
 // Compile or generate a 100% genuine, native Windows x86_64 GUI executable (.exe) with embedded icon
 async function buildWindowsExe(url: string, appName: string, iconUrl?: string): Promise<Buffer> {
   const safeUrl = url.startsWith("http://") || url.startsWith("https://") ? url : `https://${url}`;
-  const safeName = (appName || "WebApp").slice(0, 64);
+  const safeName = (appName || "WebApp").replace(/[\\/:*?"<>|]/g, " ").trim().slice(0, 64) || "WebApp";
   const gccCmd = getMingwGcc();
   const hasGcc = fs.existsSync(gccCmd);
 
@@ -573,64 +584,86 @@ async function buildWindowsExe(url: string, appName: string, iconUrl?: string): 
 
       // Escape URL and name for C wide string literals
       const escapedUrl = safeUrl.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      const escapedName = safeName.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
-      // Windows C source: Launches the URL as a standalone native app window via Edge or Chrome,
-      // or falls back gracefully to default browser with ShellExecute.
+      // Windows C source: Launches the URL in a dedicated, standalone application window
+      // (no browser chrome, no address bar, no tabs) and registers the EXE in Windows Startup.
       const cSource = `#include <windows.h>
 #include <shellapi.h>
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     const wchar_t* targetUrl = L"${escapedUrl}";
+    const wchar_t* appName = L"${escapedName}";
+
+    // 1. Auto-register in Windows Startup (HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run)
+    HKEY hRunKey;
+    wchar_t currentExePath[MAX_PATH];
+    if (GetModuleFileNameW(NULL, currentExePath, MAX_PATH) > 0) {
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run", 0, KEY_SET_VALUE, &hRunKey) == ERROR_SUCCESS) {
+            RegSetValueExW(hRunKey, appName, 0, REG_SZ, (const BYTE*)currentExePath, (lstrlenW(currentExePath) + 1) * sizeof(wchar_t));
+            RegCloseKey(hRunKey);
+        }
+    }
+
+    // 2. Prepare isolated user data directory for true standalone application window
+    wchar_t dataDir[MAX_PATH];
+    wchar_t cmdArgs[4096];
     wchar_t browserPath[MAX_PATH];
-    wchar_t cmd[4096];
     HINSTANCE hRes;
 
-    // 1. Try Microsoft Edge (64-bit Program Files)
-    if (ExpandEnvironmentStringsW(L"%ProgramFiles%\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe", browserPath, MAX_PATH) > 0) {
-        if (GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
-            wsprintfW(cmd, L"--app=\\"%s\\"", targetUrl);
-            hRes = ShellExecuteW(NULL, L"open", browserPath, cmd, NULL, SW_SHOWNORMAL);
-            if ((INT_PTR)hRes > 32) return 0;
-        }
+    if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\WebsktopApps", dataDir, MAX_PATH) > 0) {
+        CreateDirectoryW(dataDir, NULL);
+    }
+    if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\WebsktopApps\\\\${escapedName}", dataDir, MAX_PATH) > 0) {
+        CreateDirectoryW(dataDir, NULL);
     }
 
-    // 2. Try Microsoft Edge (32-bit Program Files)
-    if (ExpandEnvironmentStringsW(L"%ProgramFiles(x86)%\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe", browserPath, MAX_PATH) > 0) {
-        if (GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
-            wsprintfW(cmd, L"--app=\\"%s\\"", targetUrl);
-            hRes = ShellExecuteW(NULL, L"open", browserPath, cmd, NULL, SW_SHOWNORMAL);
-            if ((INT_PTR)hRes > 32) return 0;
-        }
+    // Launch flags: opens separate dedicated app window, independent of regular browser sessions
+    wsprintfW(cmdArgs, L"--app=\\"%s\\" --user-data-dir=\\"%s\\" --no-first-run --no-default-browser-check --disable-extensions", targetUrl, dataDir);
+
+    // 1. Microsoft Edge (64-bit)
+    if (ExpandEnvironmentStringsW(L"%ProgramFiles%\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe", browserPath, MAX_PATH) > 0 &&
+        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
+        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
+        if ((INT_PTR)hRes > 32) return 0;
     }
 
-    // 3. Try Google Chrome (64-bit Program Files)
-    if (ExpandEnvironmentStringsW(L"%ProgramFiles%\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe", browserPath, MAX_PATH) > 0) {
-        if (GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
-            wsprintfW(cmd, L"--app=\\"%s\\"", targetUrl);
-            hRes = ShellExecuteW(NULL, L"open", browserPath, cmd, NULL, SW_SHOWNORMAL);
-            if ((INT_PTR)hRes > 32) return 0;
-        }
+    // 2. Microsoft Edge (32-bit)
+    if (ExpandEnvironmentStringsW(L"%ProgramFiles(x86)%\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe", browserPath, MAX_PATH) > 0 &&
+        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
+        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
+        if ((INT_PTR)hRes > 32) return 0;
     }
 
-    // 4. Try Google Chrome (32-bit Program Files)
-    if (ExpandEnvironmentStringsW(L"%ProgramFiles(x86)%\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe", browserPath, MAX_PATH) > 0) {
-        if (GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
-            wsprintfW(cmd, L"--app=\\"%s\\"", targetUrl);
-            hRes = ShellExecuteW(NULL, L"open", browserPath, cmd, NULL, SW_SHOWNORMAL);
-            if ((INT_PTR)hRes > 32) return 0;
-        }
+    // 3. Google Chrome (64-bit)
+    if (ExpandEnvironmentStringsW(L"%ProgramFiles%\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe", browserPath, MAX_PATH) > 0 &&
+        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
+        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
+        if ((INT_PTR)hRes > 32) return 0;
     }
 
-    // 5. Try LocalAppData Edge / Chrome
-    if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe", browserPath, MAX_PATH) > 0) {
-        if (GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
-            wsprintfW(cmd, L"--app=\\"%s\\"", targetUrl);
-            hRes = ShellExecuteW(NULL, L"open", browserPath, cmd, NULL, SW_SHOWNORMAL);
-            if ((INT_PTR)hRes > 32) return 0;
-        }
+    // 4. Google Chrome (32-bit)
+    if (ExpandEnvironmentStringsW(L"%ProgramFiles(x86)%\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe", browserPath, MAX_PATH) > 0 &&
+        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
+        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
+        if ((INT_PTR)hRes > 32) return 0;
     }
 
-    // 6. Universal Fallback: Default Browser
+    // 5. LocalAppData Edge
+    if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe", browserPath, MAX_PATH) > 0 &&
+        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
+        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
+        if ((INT_PTR)hRes > 32) return 0;
+    }
+
+    // 6. LocalAppData Chrome
+    if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe", browserPath, MAX_PATH) > 0 &&
+        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
+        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
+        if ((INT_PTR)hRes > 32) return 0;
+    }
+
+    // Universal Fallback
     ShellExecuteW(NULL, L"open", targetUrl, NULL, NULL, SW_SHOWNORMAL);
     return 0;
 }
@@ -682,18 +715,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         if (resObjPath) {
           try {
             execSync(
-              `"${gccCmd}" -mwindows -O2 -s "${cPath}" "${resObjPath}" -o "${exePath}" -lshlwapi`,
+              `"${gccCmd}" -mwindows -O2 -s "${cPath}" "${resObjPath}" -o "${exePath}" -lshell32 -ladvapi32 -lshlwapi`,
               { timeout: 20000 }
             );
           } catch {
             execSync(
-              `"${gccCmd}" -mwindows -O2 -s "${cPath}" -o "${exePath}" -lshlwapi`,
+              `"${gccCmd}" -mwindows -O2 -s "${cPath}" -o "${exePath}" -lshell32 -ladvapi32 -lshlwapi`,
               { timeout: 20000 }
             );
           }
         } else {
           execSync(
-            `"${gccCmd}" -mwindows -O2 -s "${cPath}" -o "${exePath}" -lshlwapi`,
+            `"${gccCmd}" -mwindows -O2 -s "${cPath}" -o "${exePath}" -lshell32 -ladvapi32 -lshlwapi`,
             { timeout: 20000 }
           );
         }
@@ -714,7 +747,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
   }
 
   // Guaranteed, instantaneous fallback: patch the tested native Windows executable template
-  return patchExeTemplate(safeUrl);
+  return patchExeTemplate(safeUrl, safeName);
 }
 
 // Helper to build a 100% genuine Android .apk package with embedded app icons

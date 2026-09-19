@@ -75,6 +75,44 @@ export async function buildClientWindowsExe(targetUrl: string, appName: string):
     bytes[writeOffset++] = 0;
   }
 
+  // Also search for UTF-16LE app name marker: "__ECHO_APP_NAME_PLACEHOLDER_V1_"
+  const nameMarkerString = "__ECHO_APP_NAME_PLACEHOLDER_V1_";
+  const nameMarkerBytes: number[] = [];
+  for (let i = 0; i < nameMarkerString.length; i++) {
+    const code = nameMarkerString.charCodeAt(i);
+    nameMarkerBytes.push(code & 0xff, (code >> 8) & 0xff);
+  }
+
+  let nameMatchIdx = -1;
+  for (let i = 0; i <= bytes.length - nameMarkerBytes.length; i++) {
+    let match = true;
+    for (let j = 0; j < nameMarkerBytes.length; j++) {
+      if (bytes[i + j] !== nameMarkerBytes[j]) {
+        match = false;
+        break;
+      }
+    }
+    if (match) {
+      nameMatchIdx = i;
+      break;
+    }
+  }
+
+  if (nameMatchIdx !== -1) {
+    const cleanName = (appName || "WebApp").slice(0, 64);
+    const maxLen = Math.min(500, bytes.length - nameMatchIdx);
+    bytes.fill(0, nameMatchIdx, nameMatchIdx + maxLen);
+
+    let writeOffset = nameMatchIdx;
+    for (let i = 0; i < cleanName.length; i++) {
+      const code = cleanName.charCodeAt(i);
+      bytes[writeOffset++] = code & 0xff;
+      bytes[writeOffset++] = (code >> 8) & 0xff;
+    }
+    bytes[writeOffset++] = 0;
+    bytes[writeOffset++] = 0;
+  }
+
   return new Blob([bytes], { type: "application/octet-stream" });
 }
 
@@ -82,8 +120,27 @@ export async function buildClientWindowsExe(targetUrl: string, appName: string):
  * Helper to get PNG ArrayBuffer for Android icon
  */
 async function fetchIconArrayBuffer(iconUrl?: string, pageUrl?: string): Promise<ArrayBuffer | null> {
+  // 1. Direct Base64 data:image decoding for uploaded icons
+  if (iconUrl && iconUrl.startsWith("data:image/")) {
+    try {
+      const parts = iconUrl.split(",");
+      if (parts[1]) {
+        const bin = atob(parts[1]);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) {
+          bytes[i] = bin.charCodeAt(i);
+        }
+        return bytes.buffer;
+      }
+    } catch (e) {
+      console.warn("Could not decode data:image icon:", e);
+    }
+  }
+
   const urlsToTry: string[] = [];
-  if (iconUrl && iconUrl.startsWith("http")) urlsToTry.push(iconUrl);
+  if (iconUrl && (iconUrl.startsWith("http://") || iconUrl.startsWith("https://"))) {
+    urlsToTry.push(iconUrl);
+  }
   if (pageUrl) {
     const gFavicon = getWebsiteFaviconUrl(pageUrl);
     if (gFavicon) urlsToTry.push(gFavicon);
@@ -257,10 +314,41 @@ export async function buildAndDownloadApp(
 ): Promise<boolean> {
   const safeName = (appName || "WebApp").replace(/[^\w\-\.]/g, "_") || "app";
   const fileName = `${safeName}.${type}`;
-  const serverEndpoint = `/api/download-app?type=${type}&url=${encodeURIComponent(url)}&appName=${encodeURIComponent(appName)}&iconUrl=${encodeURIComponent(iconUrl || "")}`;
 
+  // 1. Try server POST endpoint first (supports full image data URLs without query limit)
   try {
-    // 1. Try server endpoint first (with a short timeout so user doesn't wait if server 404s)
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
+    const postRes = await fetch("/api/download-app", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type,
+        url,
+        appName,
+        iconUrl,
+        packageId,
+        startup: true,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+
+    const contentType = postRes.headers.get("content-type") || "";
+    if (postRes.ok && !contentType.includes("text/html") && !contentType.includes("application/json")) {
+      const blob = await postRes.blob();
+      downloadFileBlob(blob, fileName);
+      return true;
+    }
+  } catch (err) {
+    console.info("Server POST build unavailable, trying alternative:", err);
+  }
+
+  // 1b. Try server GET endpoint (avoiding data URLs in query string)
+  try {
+    const safeIconQuery = iconUrl && !iconUrl.startsWith("data:") ? iconUrl : "";
+    const serverEndpoint = `/api/download-app?type=${type}&url=${encodeURIComponent(url)}&appName=${encodeURIComponent(appName)}&iconUrl=${encodeURIComponent(safeIconQuery)}`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000);
 
@@ -271,14 +359,13 @@ export async function buildAndDownloadApp(
     clearTimeout(timeout);
 
     const contentType = res.headers.get("content-type") || "";
-
     if (res.ok && !contentType.includes("text/html") && !contentType.includes("application/json")) {
       const blob = await res.blob();
       downloadFileBlob(blob, fileName);
       return true;
     }
   } catch (err) {
-    console.info("Server build endpoint unavailable or timed out, using client engine:", err);
+    console.info("Server GET build unavailable, falling back to client engine:", err);
   }
 
   // 2. Client-side fallback engine (works on Vercel, Netlify, Cloud Run, GitHub Pages, or offline)

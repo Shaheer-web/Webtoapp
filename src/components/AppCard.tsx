@@ -142,35 +142,61 @@ export const AppCard: React.FC<AppCardProps> = ({ app, onBuild, onSettings, onDe
       </div>
 
       {/* Card Action Footer */}
-      <div className="flex items-center space-x-2 pt-2 border-t border-slate-100">
-        <button
-          onClick={() => onBuild(app)}
-          className="flex-1 py-2 px-3 bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white text-xs font-semibold rounded-lg flex items-center justify-center space-x-1.5 transition-colors shadow-xs cursor-pointer"
-        >
-          <Download className="w-3.5 h-3.5" />
-          <span>Build & Options</span>
-        </button>
+      <div className="pt-2 border-t border-slate-100">
+        {confirmDelete ? (
+          <div className="flex items-center justify-between bg-rose-50 border border-rose-200 rounded-lg p-2 animate-in fade-in duration-150">
+            <span className="text-[11px] font-semibold text-rose-800">
+              Delete project?
+            </span>
+            <div className="flex items-center space-x-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  if (onDelete) onDelete(app.id);
+                  setConfirmDelete(false);
+                }}
+                className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold rounded cursor-pointer transition-colors shadow-2xs"
+              >
+                Delete
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(false)}
+                className="px-2 py-1 bg-white hover:bg-slate-100 text-slate-600 text-[11px] font-medium rounded border border-slate-200 cursor-pointer transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => onBuild(app)}
+              className="flex-1 py-2 px-3 bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white text-xs font-semibold rounded-lg flex items-center justify-center space-x-1.5 transition-colors shadow-xs cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Build & Options</span>
+            </button>
 
-        <button
-          onClick={() => onSettings(app)}
-          className="py-2 px-2.5 bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg border border-slate-200 flex items-center justify-center space-x-1 transition-colors cursor-pointer"
-          title="App Settings"
-        >
-          <Settings className="w-3.5 h-3.5 text-slate-500" />
-        </button>
+            <button
+              onClick={() => onSettings(app)}
+              className="py-2 px-2.5 bg-white hover:bg-slate-50 active:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg border border-slate-200 flex items-center justify-center space-x-1 transition-colors cursor-pointer"
+              title="App Settings"
+            >
+              <Settings className="w-3.5 h-3.5 text-slate-500" />
+            </button>
 
-        {onDelete && (
-          <button
-            onClick={() => {
-              if (confirm(`Delete ${app.name}?`)) {
-                onDelete(app.id);
-              }
-            }}
-            className="py-2 px-2.5 bg-white hover:bg-red-50 text-slate-400 hover:text-red-600 text-xs font-semibold rounded-lg border border-slate-200 hover:border-red-200 flex items-center justify-center transition-colors cursor-pointer"
-            title="Delete App"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+            {onDelete && (
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                className="py-2 px-2.5 bg-white hover:bg-rose-50 text-slate-400 hover:text-rose-600 text-xs font-semibold rounded-lg border border-slate-200 hover:border-rose-200 flex items-center justify-center transition-colors cursor-pointer"
+                title="Delete App"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         )}
       </div>
     </div>

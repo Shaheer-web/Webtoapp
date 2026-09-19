@@ -13,6 +13,7 @@ import {
   Check,
   RefreshCw,
   Globe,
+  Upload,
 } from "lucide-react";
 import { AppProject, DashboardView, DownloadNotification, ECHO_LOGO_URL } from "./types";
 import { Sidebar } from "./components/Sidebar";
@@ -23,6 +24,7 @@ import { BuildDownloadModal } from "./components/BuildDownloadModal";
 import { EditAppModal } from "./components/EditAppModal";
 import { DownloadNotificationToast } from "./components/DownloadNotificationToast";
 import { detectWebsiteBrand, getWebsiteFaviconUrl, getWebsiteFallbackIcon } from "./utils/iconHelper";
+import { processImageFile } from "./utils/imageUploadHelper";
 
 // Initial apps: strictly empty by default (no pre-added apps)
 const INITIAL_APPS: AppProject[] = [];
@@ -96,6 +98,23 @@ export default function App() {
   const quickDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const quickAbortRef = useRef<AbortController | null>(null);
   const userEditedQuickNameRef = useRef(false);
+  const userEditedQuickIconRef = useRef(false);
+  const heroFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleHeroFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      userEditedQuickIconRef.current = true;
+      try {
+        const processedUrl = await processImageFile(file);
+        setQuickIconUrl(processedUrl);
+      } catch (err) {
+        console.error("Failed to process icon image:", err);
+      } finally {
+        e.target.value = "";
+      }
+    }
+  };
 
   // Probe URL to auto-fill title and icon
   const detectQuickMetadata = useCallback(async (rawInput: string, force = false) => {
@@ -134,7 +153,7 @@ export default function App() {
           setQuickName(detectedTitle);
         }
         const detectedFavicon = data.faviconUrl || data.googleFaviconUrl;
-        if (detectedFavicon) {
+        if (detectedFavicon && !userEditedQuickIconRef.current) {
           setQuickIconUrl(detectedFavicon);
         }
         setQuickDetected(true);
@@ -158,7 +177,9 @@ export default function App() {
       if (!userEditedQuickNameRef.current || !quickName.trim()) {
         setQuickName(brand.name);
       }
-      setQuickIconUrl(brand.faviconUrl);
+      if (!userEditedQuickIconRef.current) {
+        setQuickIconUrl(brand.faviconUrl);
+      }
       setQuickDetected(true);
     }
 
@@ -181,7 +202,9 @@ export default function App() {
         if (!userEditedQuickNameRef.current || !quickName.trim()) {
           setQuickName(brand.name);
         }
-        setQuickIconUrl(brand.faviconUrl);
+        if (!userEditedQuickIconRef.current) {
+          setQuickIconUrl(brand.faviconUrl);
+        }
         setQuickDetected(true);
       }
 
@@ -253,11 +276,19 @@ export default function App() {
     setQuickUrl("");
     setQuickName("");
     setQuickIconUrl("");
+    userEditedQuickNameRef.current = false;
+    userEditedQuickIconRef.current = false;
   };
 
   // Handlers
   const handleCreateApp = (newApp: AppProject) => {
-    setApps((prev) => [newApp, ...prev]);
+    setApps((prev) => {
+      const next = [newApp, ...prev];
+      try {
+        localStorage.setItem("websktop_apps", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
     // Automatically open build modal for immediate download!
     setBuildTargetApp(newApp);
 
@@ -271,11 +302,33 @@ export default function App() {
   };
 
   const handleUpdateApp = (updated: AppProject) => {
-    setApps((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+    setApps((prev) => {
+      const next = prev.map((a) => (a.id === updated.id ? updated : a));
+      try {
+        localStorage.setItem("websktop_apps", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
   };
 
   const handleDeleteApp = (id: string) => {
-    setApps((prev) => prev.filter((a) => a.id !== id));
+    const target = apps.find((a) => a.id === id);
+    setApps((prev) => {
+      const next = prev.filter((a) => a.id !== id);
+      try {
+        localStorage.setItem("websktop_apps", JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+    if (target) {
+      addNotification({
+        type: "completed",
+        title: "Project Deleted",
+        message: `"${target.name}" was permanently removed from your local projects.`,
+        appName: target.name,
+        format: "EXE",
+      });
+    }
   };
 
   const handleBuildSuccess = (appId: string) => {
@@ -450,18 +503,22 @@ export default function App() {
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                        App Icon
+                        App Icon (Picture)
                       </label>
                       <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
-                        quickIconUrl
+                        userEditedQuickIconRef.current
+                          ? "text-sky-700 bg-sky-50 border-sky-200"
+                          : quickIconUrl
                           ? "text-emerald-700 bg-emerald-50 border-emerald-200"
                           : "text-slate-600 bg-slate-50 border-slate-200"
                       }`}>
-                        {quickValidating
+                        {userEditedQuickIconRef.current
+                          ? "Custom Uploaded Picture"
+                          : quickValidating
                           ? "Fetching website picture..."
                           : quickIconUrl
                           ? "Website Picture Auto-Detected"
-                          : "Auto-detects from URL"}
+                          : "Auto-detects from URL or Upload"}
                       </span>
                     </div>
                     <div className="flex items-center space-x-3">
@@ -488,13 +545,34 @@ export default function App() {
                           </div>
                         )}
                       </div>
-                      <input
-                        type="text"
-                        value={quickIconUrl}
-                        onChange={(e) => setQuickIconUrl(e.target.value)}
-                        placeholder="Icon URL (auto-detected, or paste custom image URL)"
-                        className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
-                      />
+                      <div className="flex-1 flex items-center space-x-2">
+                        <input
+                          type="text"
+                          value={quickIconUrl}
+                          onChange={(e) => {
+                            userEditedQuickIconRef.current = true;
+                            setQuickIconUrl(e.target.value);
+                          }}
+                          placeholder="Icon URL (auto-detected or custom)"
+                          className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
+                        />
+                        <input
+                          ref={heroFileInputRef}
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg,image/webp,image/x-icon,image/svg+xml"
+                          className="hidden"
+                          onChange={handleHeroFileChange}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => heroFileInputRef.current?.click()}
+                          className="px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs rounded-xl flex items-center space-x-1.5 transition-colors shrink-0 cursor-pointer border border-slate-200"
+                          title="Upload PNG, JPG, or ICO picture"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Upload Pic</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
 

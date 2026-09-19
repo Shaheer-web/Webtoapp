@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { AppProject } from "../types";
 import { detectWebsiteBrand, getWebsiteFaviconUrl, getWebsiteFallbackIcon } from "../utils/iconHelper";
+import { processImageFile } from "../utils/imageUploadHelper";
 
 interface QuickAppModalProps {
   isOpen: boolean;
@@ -160,17 +161,18 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
   };
 
   // Upload custom icon
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       userEditedIconRef.current = true;
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") {
-          setIconUrl(reader.result);
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        const processedUrl = await processImageFile(file);
+        setIconUrl(processedUrl);
+      } catch (err) {
+        console.error("Icon upload error:", err);
+      } finally {
+        e.target.value = "";
+      }
     }
   };
 
@@ -362,6 +364,7 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
                     alt="App Icon"
                     className="w-full h-full object-contain rounded-lg"
                     onError={(e) => {
+                      if (userEditedIconRef.current) return;
                       const fb = getWebsiteFallbackIcon(url);
                       if (fb && (e.target as HTMLImageElement).src !== fb) {
                         (e.target as HTMLImageElement).src = fb;
@@ -375,7 +378,7 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
                 )}
               </div>
 
-              <div className="flex-1 space-y-1">
+              <div className="flex-1 space-y-1.5">
                 <input
                   type="file"
                   ref={fileInputRef}
@@ -390,7 +393,7 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
                     className="text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 px-3 py-1.5 rounded-lg transition-colors inline-flex items-center gap-1.5 cursor-pointer"
                   >
                     <Upload className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Upload Custom</span>
+                    <span>Upload Custom Image</span>
                   </button>
                   {iconUrl && (
                     <button
@@ -405,6 +408,16 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
                     </button>
                   )}
                 </div>
+                <input
+                  type="text"
+                  value={iconUrl}
+                  onChange={(e) => {
+                    userEditedIconRef.current = true;
+                    setIconUrl(e.target.value);
+                  }}
+                  placeholder="Or paste image URL"
+                  className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-slate-900 text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
+                />
                 <p className="text-[11px] text-slate-400">
                   {iconUrl
                     ? "Official high-res icon will be embedded in Windows .EXE & Android .APK"

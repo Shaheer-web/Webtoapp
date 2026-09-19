@@ -14,6 +14,8 @@ import {
   RefreshCw,
   Globe,
   Upload,
+  ImageIcon,
+  AlertCircle,
 } from "lucide-react";
 import { AppProject, DashboardView, DownloadNotification, ECHO_LOGO_URL } from "./types";
 import { Sidebar } from "./components/Sidebar";
@@ -24,7 +26,7 @@ import { BuildDownloadModal } from "./components/BuildDownloadModal";
 import { EditAppModal } from "./components/EditAppModal";
 import { DownloadNotificationToast } from "./components/DownloadNotificationToast";
 import { detectWebsiteBrand, getWebsiteFaviconUrl, getWebsiteFallbackIcon } from "./utils/iconHelper";
-import { processImageFile } from "./utils/imageUploadHelper";
+import { processImageFile, validateImageFile } from "./utils/imageUploadHelper";
 
 // Initial apps: strictly empty by default (no pre-added apps)
 const INITIAL_APPS: AppProject[] = [];
@@ -94,6 +96,9 @@ export default function App() {
   const [quickIconUrl, setQuickIconUrl] = useState("");
   const [quickValidating, setQuickValidating] = useState(false);
   const [quickDetected, setQuickDetected] = useState(false);
+  const [heroUploadError, setHeroUploadError] = useState<string | null>(null);
+  const [isHeroDragging, setIsHeroDragging] = useState(false);
+  const [isHeroProcessingIcon, setIsHeroProcessingIcon] = useState(false);
 
   const quickDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const quickAbortRef = useRef<AbortController | null>(null);
@@ -101,18 +106,55 @@ export default function App() {
   const userEditedQuickIconRef = useRef(false);
   const heroFileInputRef = useRef<HTMLInputElement>(null);
 
+  const handleHeroProcessFile = async (file: File) => {
+    setHeroUploadError(null);
+    const check = validateImageFile(file);
+    if (!check.valid) {
+      setHeroUploadError(check.error || "Please select a valid image file.");
+      return;
+    }
+
+    setIsHeroProcessingIcon(true);
+    userEditedQuickIconRef.current = true;
+    try {
+      const processedUrl = await processImageFile(file);
+      setQuickIconUrl(processedUrl);
+      setHeroUploadError(null);
+    } catch (err: any) {
+      console.error("Failed to process icon image:", err);
+      setHeroUploadError(err?.message || "Failed to process image.");
+    } finally {
+      setIsHeroProcessingIcon(false);
+    }
+  };
+
   const handleHeroFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      userEditedQuickIconRef.current = true;
-      try {
-        const processedUrl = await processImageFile(file);
-        setQuickIconUrl(processedUrl);
-      } catch (err) {
-        console.error("Failed to process icon image:", err);
-      } finally {
-        e.target.value = "";
-      }
+      await handleHeroProcessFile(file);
+      e.target.value = "";
+    }
+  };
+
+  const handleHeroDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsHeroDragging(true);
+  };
+
+  const handleHeroDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsHeroDragging(false);
+  };
+
+  const handleHeroDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsHeroDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      await handleHeroProcessFile(file);
     }
   };
 
@@ -500,7 +542,7 @@ export default function App() {
                     />
                   </div>
 
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
                         App Icon (Picture)
@@ -512,7 +554,9 @@ export default function App() {
                           ? "text-emerald-700 bg-emerald-50 border-emerald-200"
                           : "text-slate-600 bg-slate-50 border-slate-200"
                       }`}>
-                        {userEditedQuickIconRef.current
+                        {isHeroProcessingIcon
+                          ? "Optimizing Picture..."
+                          : userEditedQuickIconRef.current
                           ? "Custom Uploaded Picture"
                           : quickValidating
                           ? "Fetching website picture..."
@@ -521,58 +565,118 @@ export default function App() {
                           : "Auto-detects from URL or Upload"}
                       </span>
                     </div>
-                    <div className="flex items-center space-x-3">
-                      <div className={`w-12 h-12 rounded-xl border bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-xs p-1 transition-all ${
-                        quickValidating
-                          ? "border-sky-400 ring-2 ring-sky-300 animate-pulse bg-sky-50/50"
-                          : "border-slate-200"
-                      }`}>
-                        {quickIconUrl ? (
-                          <img
-                            src={quickIconUrl}
-                            alt="Website Icon"
-                            className="w-full h-full object-contain rounded-lg"
-                            onError={(e) => {
-                              const fb = getWebsiteFallbackIcon(quickUrl);
-                              if (fb && (e.target as HTMLImageElement).src !== fb) {
-                                (e.target as HTMLImageElement).src = fb;
-                              }
-                            }}
-                          />
-                        ) : (
-                          <div className="flex flex-col items-center justify-center text-slate-400">
-                            <Globe className="w-5 h-5 stroke-[1.5]" />
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex-1 flex items-center space-x-2">
-                        <input
-                          type="text"
-                          value={quickIconUrl}
-                          onChange={(e) => {
-                            userEditedQuickIconRef.current = true;
-                            setQuickIconUrl(e.target.value);
-                          }}
-                          placeholder="Icon URL (auto-detected or custom)"
-                          className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
-                        />
-                        <input
-                          ref={heroFileInputRef}
-                          type="file"
-                          accept="image/png,image/jpeg,image/jpg,image/webp,image/x-icon,image/svg+xml"
-                          className="hidden"
-                          onChange={handleHeroFileChange}
-                        />
+
+                    {/* Drag & Drop Container */}
+                    <div
+                      onDragOver={handleHeroDragOver}
+                      onDragLeave={handleHeroDragLeave}
+                      onDrop={handleHeroDrop}
+                      className={`relative border-2 border-dashed rounded-xl p-3 transition-all ${
+                        isHeroDragging
+                          ? "border-sky-500 bg-sky-50/60 ring-2 ring-sky-300 scale-[1.01]"
+                          : "border-slate-300 bg-slate-50/50 hover:bg-slate-50"
+                      }`}
+                    >
+                      <input
+                        ref={heroFileInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg,image/jpg,image/webp,image/x-icon,image/vnd.microsoft.icon,image/svg+xml,image/*"
+                        className="hidden"
+                        onChange={handleHeroFileChange}
+                      />
+
+                      <div className="flex items-center space-x-3">
+                        {/* Clickable Icon Box */}
                         <button
                           type="button"
                           onClick={() => heroFileInputRef.current?.click()}
-                          className="px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium text-xs rounded-xl flex items-center space-x-1.5 transition-colors shrink-0 cursor-pointer border border-slate-200"
-                          title="Upload PNG, JPG, or ICO picture"
+                          title="Click to select or change picture"
+                          className={`w-14 h-14 rounded-xl border bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-xs p-1 transition-all cursor-pointer group relative ${
+                            isHeroProcessingIcon
+                              ? "border-sky-400 ring-2 ring-sky-300"
+                              : "border-slate-200 hover:border-sky-400 hover:ring-2 hover:ring-sky-200"
+                          }`}
                         >
-                          <Upload className="w-3.5 h-3.5" />
-                          <span>Upload Pic</span>
+                          {isHeroProcessingIcon ? (
+                            <Loader2 className="w-6 h-6 text-sky-600 animate-spin" />
+                          ) : quickIconUrl ? (
+                            <>
+                              <img
+                                src={quickIconUrl}
+                                alt="Website Icon"
+                                className="w-full h-full object-contain rounded-lg"
+                                onError={(e) => {
+                                  const fb = getWebsiteFallbackIcon(quickUrl);
+                                  if (fb && (e.target as HTMLImageElement).src !== fb) {
+                                    (e.target as HTMLImageElement).src = fb;
+                                  }
+                                }}
+                              />
+                              <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg">
+                                <Upload className="w-4 h-4 text-white" />
+                              </div>
+                            </>
+                          ) : (
+                            <div className="flex flex-col items-center justify-center text-slate-400 group-hover:text-sky-600">
+                              <ImageIcon className="w-6 h-6 stroke-[1.5]" />
+                            </div>
+                          )}
                         </button>
+
+                        <div className="flex-1 min-w-0 space-y-1.5">
+                          <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                            <button
+                              type="button"
+                              onClick={() => heroFileInputRef.current?.click()}
+                              className="px-3 py-1.5 bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white font-semibold text-xs rounded-lg flex items-center space-x-1.5 transition-colors shrink-0 cursor-pointer shadow-xs"
+                              title="Upload PNG, JPG, or ICO picture"
+                            >
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>{quickIconUrl ? "Change Picture" : "Upload Picture"}</span>
+                            </button>
+
+                            {quickIconUrl && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  userEditedQuickIconRef.current = false;
+                                  setQuickIconUrl("");
+                                  setHeroUploadError(null);
+                                }}
+                                className="text-xs text-rose-500 hover:text-rose-700 font-medium px-1.5 py-1 hover:underline cursor-pointer"
+                              >
+                                Reset
+                              </button>
+                            )}
+                            <span className="text-[11px] text-slate-400 hidden sm:inline">
+                              or drag &amp; drop image here
+                            </span>
+                          </div>
+
+                          <input
+                            type="text"
+                            value={quickIconUrl}
+                            onChange={(e) => {
+                              userEditedQuickIconRef.current = true;
+                              setQuickIconUrl(e.target.value);
+                              setHeroUploadError(null);
+                            }}
+                            placeholder="Or paste any image URL..."
+                            className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
+                          />
+                        </div>
                       </div>
+
+                      {heroUploadError && (
+                        <div className="mt-2 text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                          <span>{heroUploadError}</span>
+                        </div>
+                      )}
+
+                      <p className="mt-1.5 text-[10px] text-slate-400">
+                        Supports PNG, JPG, JPEG, WEBP, ICO, SVG. Rescaled and embedded into Windows .EXE &amp; Android .APK.
+                      </p>
                     </div>
                   </div>
 

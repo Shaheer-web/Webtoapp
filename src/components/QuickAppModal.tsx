@@ -9,11 +9,13 @@ import {
   Loader2,
   Check,
   Monitor,
-  Smartphone
+  Smartphone,
+  ImageIcon,
+  AlertCircle,
 } from "lucide-react";
 import { AppProject } from "../types";
 import { detectWebsiteBrand, getWebsiteFaviconUrl, getWebsiteFallbackIcon } from "../utils/iconHelper";
-import { processImageFile } from "../utils/imageUploadHelper";
+import { processImageFile, validateImageFile } from "../utils/imageUploadHelper";
 
 interface QuickAppModalProps {
   isOpen: boolean;
@@ -32,6 +34,9 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
   const [description, setDescription] = useState("");
   const [isValidating, setIsValidating] = useState(false);
   const [detectedSuccess, setDetectedSuccess] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [isProcessingIcon, setIsProcessingIcon] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const userEditedNameRef = useRef(false);
@@ -160,19 +165,56 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
     setName(e.target.value);
   };
 
-  // Upload custom icon
+  // Upload custom icon helper
+  const handleProcessFile = async (file: File) => {
+    setUploadError(null);
+    const check = validateImageFile(file);
+    if (!check.valid) {
+      setUploadError(check.error || "Please select a valid image file.");
+      return;
+    }
+
+    setIsProcessingIcon(true);
+    userEditedIconRef.current = true;
+    try {
+      const processedUrl = await processImageFile(file);
+      setIconUrl(processedUrl);
+      setUploadError(null);
+    } catch (err: any) {
+      console.error("Icon upload error:", err);
+      setUploadError(err?.message || "Failed to process image. Please try another image.");
+    } finally {
+      setIsProcessingIcon(false);
+    }
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      userEditedIconRef.current = true;
-      try {
-        const processedUrl = await processImageFile(file);
-        setIconUrl(processedUrl);
-      } catch (err) {
-        console.error("Icon upload error:", err);
-      } finally {
-        e.target.value = "";
-      }
+      await handleProcessFile(file);
+      e.target.value = "";
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) {
+      await handleProcessFile(file);
     }
   };
 
@@ -335,95 +377,141 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
           </div>
 
           {/* 3. Icon */}
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                3. App Icon
+                3. App Icon (Picture)
               </label>
-              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${
-                iconUrl
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
+                userEditedIconRef.current
+                  ? "text-sky-700 bg-sky-50 border-sky-200"
+                  : iconUrl
                   ? "text-emerald-700 bg-emerald-50 border-emerald-200"
                   : "text-slate-600 bg-slate-50 border-slate-200"
               }`}>
-                {isValidating
+                {isProcessingIcon
+                  ? "Optimizing Picture..."
+                  : isValidating
                   ? "Fetching website picture..."
+                  : userEditedIconRef.current
+                  ? "Custom Picture Uploaded"
                   : iconUrl
-                  ? (userEditedIconRef.current ? "Custom Icon" : "Website Picture Auto-Detected")
-                  : "Auto-detects from URL"}
+                  ? "Website Picture Auto-Detected"
+                  : "Auto-detects from URL or Upload"}
               </span>
             </div>
-            <div className="flex items-center space-x-3">
-              <div className={`w-14 h-14 rounded-xl border bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-xs p-1 transition-all ${
-                isValidating
-                  ? "border-sky-400 ring-2 ring-sky-300 animate-pulse bg-sky-50/50"
-                  : "border-slate-200"
-              }`}>
-                {iconUrl ? (
-                  <img
-                    src={iconUrl}
-                    alt="App Icon"
-                    className="w-full h-full object-contain rounded-lg"
-                    onError={(e) => {
-                      if (userEditedIconRef.current) return;
-                      const fb = getWebsiteFallbackIcon(url);
-                      if (fb && (e.target as HTMLImageElement).src !== fb) {
-                        (e.target as HTMLImageElement).src = fb;
-                      }
-                    }}
-                  />
-                ) : (
-                  <div className="flex flex-col items-center justify-center text-slate-400">
-                    <Globe className="w-6 h-6 stroke-[1.5]" />
-                  </div>
-                )}
-              </div>
 
-              <div className="flex-1 space-y-1.5">
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept="image/*,.ico"
-                  onChange={handleFileChange}
-                  className="hidden"
-                />
-                <div className="flex items-center space-x-2">
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 px-3 py-1.5 rounded-lg transition-colors inline-flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Upload className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Upload Custom Image</span>
-                  </button>
-                  {iconUrl && (
+            {/* Drag & Drop Upload Container */}
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`relative border-2 border-dashed rounded-xl p-3 transition-all ${
+                isDragging
+                  ? "border-sky-500 bg-sky-50/60 ring-2 ring-sky-300 scale-[1.01]"
+                  : "border-slate-300 bg-slate-50/50 hover:bg-slate-50"
+              }`}
+            >
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept="image/png,image/jpeg,image/jpg,image/webp,image/x-icon,image/vnd.microsoft.icon,image/svg+xml,image/*"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+
+              <div className="flex items-center space-x-3">
+                {/* Clickable Icon Box */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Click to select or change picture"
+                  className={`w-14 h-14 rounded-xl border bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-xs p-1 transition-all cursor-pointer group relative ${
+                    isProcessingIcon
+                      ? "border-sky-400 ring-2 ring-sky-300"
+                      : "border-slate-200 hover:border-sky-400 hover:ring-2 hover:ring-sky-200"
+                  }`}
+                >
+                  {isProcessingIcon ? (
+                    <Loader2 className="w-6 h-6 text-sky-600 animate-spin" />
+                  ) : iconUrl ? (
+                    <>
+                      <img
+                        src={iconUrl}
+                        alt="App Icon"
+                        className="w-full h-full object-contain rounded-lg"
+                        onError={(e) => {
+                          if (userEditedIconRef.current) return;
+                          const fb = getWebsiteFallbackIcon(url);
+                          if (fb && (e.target as HTMLImageElement).src !== fb) {
+                            (e.target as HTMLImageElement).src = fb;
+                          }
+                        }}
+                      />
+                      <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg">
+                        <Upload className="w-4 h-4 text-white" />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center text-slate-400 group-hover:text-sky-600">
+                      <ImageIcon className="w-6 h-6 stroke-[1.5]" />
+                    </div>
+                  )}
+                </button>
+
+                {/* Upload Action and Dropzone info */}
+                <div className="flex-1 min-w-0 space-y-1.5">
+                  <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                     <button
                       type="button"
-                      onClick={() => {
-                        userEditedIconRef.current = false;
-                        setIconUrl("");
-                      }}
-                      className="text-xs text-rose-500 hover:underline cursor-pointer"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 active:bg-sky-800 px-3 py-1.5 rounded-lg transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
                     >
-                      Reset
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>{iconUrl ? "Change Picture" : "Upload Picture"}</span>
                     </button>
-                  )}
+                    {iconUrl && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          userEditedIconRef.current = false;
+                          setIconUrl("");
+                          setUploadError(null);
+                        }}
+                        className="text-xs text-rose-500 hover:text-rose-700 font-medium px-1.5 py-1 hover:underline cursor-pointer"
+                      >
+                        Reset
+                      </button>
+                    )}
+                    <span className="text-[11px] text-slate-400 hidden sm:inline">
+                      or drag &amp; drop image here
+                    </span>
+                  </div>
+
+                  <input
+                    type="text"
+                    value={iconUrl}
+                    onChange={(e) => {
+                      userEditedIconRef.current = true;
+                      setIconUrl(e.target.value);
+                      setUploadError(null);
+                    }}
+                    placeholder="Or paste any image URL..."
+                    className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
+                  />
                 </div>
-                <input
-                  type="text"
-                  value={iconUrl}
-                  onChange={(e) => {
-                    userEditedIconRef.current = true;
-                    setIconUrl(e.target.value);
-                  }}
-                  placeholder="Or paste image URL"
-                  className="w-full px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-slate-900 text-xs focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
-                />
-                <p className="text-[11px] text-slate-400">
-                  {iconUrl
-                    ? "Official high-res icon will be embedded in Windows .EXE & Android .APK"
-                    : "Paste a URL above to auto-detect official icon, or upload an image."}
-                </p>
               </div>
+
+              {uploadError && (
+                <div className="mt-2 text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                  <span>{uploadError}</span>
+                </div>
+              )}
+
+              <p className="mt-1.5 text-[10px] text-slate-400">
+                Supports PNG, JPG, JPEG, WEBP, ICO, SVG. Automatically optimized and embedded into Windows .EXE &amp; Android .APK.
+              </p>
             </div>
           </div>
 

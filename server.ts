@@ -526,6 +526,13 @@ function getMingwGcc(): string {
   return "x86_64-w64-mingw32-gcc";
 }
 
+function getMingwGxx(): string {
+  if (fs.existsSync("/usr/bin/x86_64-w64-mingw32-g++")) return "/usr/bin/x86_64-w64-mingw32-g++";
+  if (fs.existsSync("/usr/bin/x86_64-w64-mingw32-g++-posix")) return "/usr/bin/x86_64-w64-mingw32-g++-posix";
+  if (fs.existsSync("/usr/bin/x86_64-w64-mingw32-g++-win32")) return "/usr/bin/x86_64-w64-mingw32-g++-win32";
+  return "x86_64-w64-mingw32-g++";
+}
+
 function getWindres(): string {
   if (fs.existsSync("/usr/bin/x86_64-w64-mingw32-windres")) return "/usr/bin/x86_64-w64-mingw32-windres";
   return "windres";
@@ -586,10 +593,12 @@ async function buildWindowsExe(url: string, appName: string, iconUrl?: string): 
   const safeUrl = url.startsWith("http://") || url.startsWith("https://") ? url : `https://${url}`;
   const safeName = (appName || "WebApp").replace(/[\\/:*?"<>|]/g, " ").trim().slice(0, 64) || "WebApp";
   const gccCmd = getMingwGcc();
+  const gxxCmd = getMingwGxx();
   const hasGcc = fs.existsSync(gccCmd);
+  const hasGxx = fs.existsSync(gxxCmd);
 
   // If compiler toolchain is present in the runtime environment, compile customized executable
-  if (hasGcc) {
+  if (hasGcc || hasGxx) {
     const tmpDir = fs.mkdtempSync(path.join("/tmp", "win-exe-"));
 
     try {
@@ -752,8 +761,85 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
       }
 
-      // Compile native Windows executable with mingw-w64
+      // Compile native Windows executable
       const exePath = path.join(tmpDir, "app.exe");
+      const webviewHeader = path.join(process.cwd(), "assets", "webview2", "webview.h");
+      const webviewInclude = path.join(process.cwd(), "assets", "webview2", "include");
+
+      // Preferred path: Native Standalone WebView2 Desktop Window (own process, own window, custom picture on taskbar/task manager)
+      if (hasGxx && fs.existsSync(webviewHeader)) {
+        const appId = `EchoApp.${safeName.replace(/[^a-zA-Z0-9]/g, "")}`;
+        const cppSource = `#include <windows.h>
+#include <shellapi.h>
+#include <shlwapi.h>
+#define WEBVIEW_BUILD_STATIC
+#include "${webviewHeader}"
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    // 1. Separate Process AppUserModelID so Windows never groups this with Edge or Chrome
+    typedef HRESULT (WINAPI *SetAppIdFn)(PCWSTR);
+    HMODULE hShell = LoadLibraryA("shell32.dll");
+    if (hShell) {
+        SetAppIdFn setAppId = (SetAppIdFn)GetProcAddress(hShell, "SetCurrentProcessExplicitAppUserModelID");
+        if (setAppId) {
+            setAppId(L"${appId}");
+        }
+    }
+
+    // 2. Windows Startup auto-registration
+    HKEY hRunKey;
+    wchar_t currentExePath[MAX_PATH];
+    if (GetModuleFileNameW(NULL, currentExePath, MAX_PATH) > 0) {
+        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run", 0, KEY_SET_VALUE, &hRunKey) == ERROR_SUCCESS) {
+            RegSetValueExW(hRunKey, L"${escapedName}", 0, REG_SZ, (const BYTE*)currentExePath, (lstrlenW(currentExePath) + 1) * sizeof(wchar_t));
+            RegCloseKey(hRunKey);
+        }
+    }
+
+    const char* targetUrl = "${escapedUrl}";
+    const char* appTitle = "${escapedName}";
+
+    try {
+        webview::webview w(true, nullptr);
+        w.set_title(appTitle);
+        w.set_size(1200, 800, WEBVIEW_HINT_NONE);
+
+        HWND hwnd = (HWND)w.window();
+        if (hwnd) {
+            HICON hIconBig = LoadIconW(hInstance, MAKEINTRESOURCEW(1));
+            HICON hIconSm = (HICON)LoadImageW(hInstance, MAKEINTRESOURCEW(1), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+            if (hIconBig) SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)hIconBig);
+            if (hIconSm) SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hIconSm);
+        }
+
+        w.navigate(targetUrl);
+        w.run();
+        return 0;
+    } catch (...) {
+        ShellExecuteA(NULL, "open", targetUrl, NULL, NULL, SW_SHOWNORMAL);
+        return 0;
+    }
+}
+`;
+        const cppPath = path.join(tmpDir, "main.cpp");
+        fs.writeFileSync(cppPath, cppSource);
+
+        try {
+          const resArg = resObjPath ? `"${resObjPath}"` : "";
+          execSync(
+            `"${gxxCmd}" -std=c++14 -O2 -s "${cppPath}" ${resArg} -I"${webviewInclude}" -mwindows -lole32 -lshlwapi -lversion -o "${exePath}"`,
+            { timeout: 25000 }
+          );
+
+          if (fs.existsSync(exePath) && fs.statSync(exePath).size > 1000) {
+            return fs.readFileSync(exePath);
+          }
+        } catch {
+          // Fall back to C launcher below
+        }
+      }
+
+      // Secondary path: Optimized C launcher
       try {
         if (resObjPath) {
           try {

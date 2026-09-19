@@ -316,11 +316,19 @@ async function getIconBuffer(iconUrl?: string, appUrl?: string): Promise<Buffer>
     } catch {}
   }
 
-  // 1. If an explicit icon URL is provided, attempt to fetch it
-  if (iconUrl && iconUrl.startsWith("data:image/")) {
-    const parts = iconUrl.split(",");
-    if (parts[1]) {
-      return Buffer.from(parts[1], "base64");
+  // 1. If explicit icon data is provided, decode it immediately
+  if (iconUrl && (iconUrl.startsWith("data:") || iconUrl.includes(";base64,"))) {
+    const commaIdx = iconUrl.indexOf(",");
+    if (commaIdx !== -1) {
+      try {
+        const rawB64 = iconUrl.slice(commaIdx + 1).replace(/\s/g, "");
+        const buf = Buffer.from(rawB64, "base64");
+        if (buf.length > 50) {
+          return buf;
+        }
+      } catch (err: any) {
+        console.warn("Could not decode base64 data icon:", err.message);
+      }
     }
   }
 
@@ -426,20 +434,23 @@ function prepareAppIcons(iconBuf: Buffer, targetDir: string): {
   fs.writeFileSync(rawPath, iconBuf);
 
   const png256 = path.join(targetDir, "icon_256.png");
-  try {
-    execSync(`convert "${rawPath}[0]" -background none -resize 256x256 "${png256}"`, { timeout: 8000 });
-  } catch {
+  if (ext === "png" && iconBuf.length > 50) {
+    fs.writeFileSync(png256, iconBuf);
+  } else {
     try {
-      execSync(`convert "${rawPath}" -resize 256x256 "${png256}"`, { timeout: 8000 });
+      execSync(`convert "${rawPath}" -background none -resize 256x256 "${png256}"`, { timeout: 8000 });
     } catch {
-      // If convert completely failed, use our high quality fallback PNG
-      const defaultPng = fs.existsSync("/tmp/default_app.png")
-        ? "/tmp/default_app.png"
-        : path.join(process.cwd(), "public", "default_app.png");
-      if (fs.existsSync(defaultPng)) {
-        fs.copyFileSync(defaultPng, png256);
-      } else {
-        fs.copyFileSync(rawPath, png256);
+      try {
+        execSync(`convert "${rawPath}[0]" -background none -resize 256x256 "${png256}"`, { timeout: 8000 });
+      } catch {
+        const defaultPng = fs.existsSync("/tmp/default_app.png")
+          ? "/tmp/default_app.png"
+          : path.join(process.cwd(), "public", "default_app.png");
+        if (fs.existsSync(defaultPng)) {
+          fs.copyFileSync(defaultPng, png256);
+        } else {
+          fs.copyFileSync(rawPath, png256);
+        }
       }
     }
   }
@@ -456,13 +467,15 @@ function prepareAppIcons(iconBuf: Buffer, targetDir: string): {
 
   // Windows .ico with multi-resolution support
   const icoPath = path.join(targetDir, "app.ico");
-  try {
-    execSync(`icotool -c -o "${icoPath}" "${png256}"`, { timeout: 8000 });
-  } catch {
+  if (ext === "ico" && isValidIcoFile(rawPath)) {
+    fs.copyFileSync(rawPath, icoPath);
+  } else {
     try {
       execSync(`convert "${png256}" -define icon:auto-resize=64,32,16 "${icoPath}"`, { timeout: 8000 });
     } catch {
-      // Fallback to default .ico
+      try {
+        execSync(`icotool -c -o "${icoPath}" "${png256}"`, { timeout: 8000 });
+      } catch {}
     }
   }
 
@@ -607,64 +620,93 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     // 2. Prepare isolated user data directory for true standalone application window
+    wchar_t rootDataDir[MAX_PATH];
     wchar_t dataDir[MAX_PATH];
+    wchar_t firstRunPath[MAX_PATH];
     wchar_t cmdArgs[4096];
     wchar_t browserPath[MAX_PATH];
     HINSTANCE hRes;
 
-    if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\WebsktopApps", dataDir, MAX_PATH) > 0) {
-        CreateDirectoryW(dataDir, NULL);
+    if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\WebsktopApps", rootDataDir, MAX_PATH) > 0) {
+        CreateDirectoryW(rootDataDir, NULL);
     }
     if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\WebsktopApps\\\\${escapedName}", dataDir, MAX_PATH) > 0) {
         CreateDirectoryW(dataDir, NULL);
+    } else {
+        lstrcpyW(dataDir, rootDataDir);
     }
 
-    // Launch flags: opens separate dedicated app window, independent of regular browser sessions
-    wsprintfW(cmdArgs, L"--app=\\"%s\\" --user-data-dir=\\"%s\\" --no-first-run --no-default-browser-check --disable-extensions", targetUrl, dataDir);
-
-    // 1. Microsoft Edge (64-bit)
-    if (ExpandEnvironmentStringsW(L"%ProgramFiles%\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe", browserPath, MAX_PATH) > 0 &&
-        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
-        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
-        if ((INT_PTR)hRes > 32) return 0;
+    // CRITICAL: Pre-create 'First Run' sentinel file in dataDir.
+    // This prevents Microsoft Edge and Google Chrome from displaying their "Welcome to Microsoft Edge",
+    // "Personalize your browser", sign-in wizards, and telemetry screens!
+    wsprintfW(firstRunPath, L"%s\\\\First Run", dataDir);
+    HANDLE hFirstRun = CreateFileW(firstRunPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hFirstRun != INVALID_HANDLE_VALUE) {
+        CloseHandle(hFirstRun);
     }
 
-    // 2. Microsoft Edge (32-bit)
-    if (ExpandEnvironmentStringsW(L"%ProgramFiles(x86)%\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe", browserPath, MAX_PATH) > 0 &&
-        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
-        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
-        if ((INT_PTR)hRes > 32) return 0;
-    }
+    // Standalone application flags:
+    // Opens in a dedicated window without browser chrome, tabs, search bar, Edge sidebars, Copilot button or first-run wizards
+    wsprintfW(cmdArgs, L"--app=\\"%s\\" --user-data-dir=\\"%s\\" --no-first-run --no-default-browser-check --disable-default-apps --disable-extensions --disable-features=msEdgeSidebar,msHub,msEdgePageSummary,msEdgeShare,EdgeFre,OptimizationHints --edge-skip-fre --disable-fre", targetUrl, dataDir);
 
-    // 3. Google Chrome (64-bit)
+    // Browser search order (Prefers Google Chrome and Brave, then Microsoft Edge with First Run suppressed):
+    // 1. Google Chrome (64-bit)
     if (ExpandEnvironmentStringsW(L"%ProgramFiles%\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe", browserPath, MAX_PATH) > 0 &&
         GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
         hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
         if ((INT_PTR)hRes > 32) return 0;
     }
 
-    // 4. Google Chrome (32-bit)
+    // 2. Google Chrome (32-bit)
     if (ExpandEnvironmentStringsW(L"%ProgramFiles(x86)%\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe", browserPath, MAX_PATH) > 0 &&
         GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
         hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
         if ((INT_PTR)hRes > 32) return 0;
     }
 
-    // 5. LocalAppData Edge
-    if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe", browserPath, MAX_PATH) > 0 &&
-        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
-        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
-        if ((INT_PTR)hRes > 32) return 0;
-    }
-
-    // 6. LocalAppData Chrome
+    // 3. Google Chrome (LocalAppData)
     if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe", browserPath, MAX_PATH) > 0 &&
         GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
         hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
         if ((INT_PTR)hRes > 32) return 0;
     }
 
-    // Universal Fallback
+    // 4. Brave Browser (64-bit)
+    if (ExpandEnvironmentStringsW(L"%ProgramFiles%\\\\BraveSoftware\\\\Brave-Browser\\\\Application\\\\brave.exe", browserPath, MAX_PATH) > 0 &&
+        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
+        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
+        if ((INT_PTR)hRes > 32) return 0;
+    }
+
+    // 5. Brave Browser (LocalAppData)
+    if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\BraveSoftware\\\\Brave-Browser\\\\Application\\\\brave.exe", browserPath, MAX_PATH) > 0 &&
+        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
+        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
+        if ((INT_PTR)hRes > 32) return 0;
+    }
+
+    // 6. Microsoft Edge (64-bit) - with First Run suppressed
+    if (ExpandEnvironmentStringsW(L"%ProgramFiles%\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe", browserPath, MAX_PATH) > 0 &&
+        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
+        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
+        if ((INT_PTR)hRes > 32) return 0;
+    }
+
+    // 7. Microsoft Edge (32-bit)
+    if (ExpandEnvironmentStringsW(L"%ProgramFiles(x86)%\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe", browserPath, MAX_PATH) > 0 &&
+        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
+        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
+        if ((INT_PTR)hRes > 32) return 0;
+    }
+
+    // 8. Microsoft Edge (LocalAppData)
+    if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe", browserPath, MAX_PATH) > 0 &&
+        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
+        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
+        if ((INT_PTR)hRes > 32) return 0;
+    }
+
+    // 9. Universal Fallback
     ShellExecuteW(NULL, L"open", targetUrl, NULL, NULL, SW_SHOWNORMAL);
     return 0;
 }
@@ -947,6 +989,49 @@ app.get("/api/download-app", async (req, res) => {
     }
   } catch (error: any) {
     console.error("Direct download error:", error);
+    return res.status(500).send("Failed to generate download: " + error.message);
+  }
+});
+
+// Universal Direct POST download endpoint (handles large uploaded pictures / base64 without URL length limits)
+app.post("/api/download-app", async (req, res) => {
+  try {
+    const { type, url, appName, packageId, iconUrl } = req.body as {
+      type?: string;
+      url?: string;
+      appName?: string;
+      packageId?: string;
+      iconUrl?: string;
+    };
+
+    if (!url) return res.status(400).send("URL parameter is required");
+
+    const safeName = (appName || "WebApp").replace(/[^a-zA-Z0-9_\- ]/g, "").trim() || "WebApp";
+    const safeFilename = safeName.replace(/[^\w\-\.]/g, "_") || "app";
+
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Disposition, Content-Length");
+
+    if (type === "apk") {
+      const cleanPkg = packageId || `com.echo.${safeName.toLowerCase().replace(/[^a-z0-9]/g, "") || "app"}`;
+      const apkBuffer = await buildAndroidApk(url, safeName, cleanPkg, iconUrl);
+      res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}.apk"; filename*=UTF-8''${encodeURIComponent(safeName)}.apk`);
+      res.setHeader("Content-Type", "application/vnd.android.package-archive");
+      res.setHeader("Content-Length", apkBuffer.length.toString());
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      return res.end(apkBuffer);
+    } else {
+      const exeBuffer = await buildWindowsExe(url, safeName, iconUrl);
+      res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}.exe"; filename*=UTF-8''${encodeURIComponent(safeName)}.exe`);
+      res.setHeader("Content-Type", "application/octet-stream");
+      res.setHeader("Content-Length", exeBuffer.length.toString());
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      return res.end(exeBuffer);
+    }
+  } catch (error: any) {
+    console.error("Direct POST download error:", error);
     return res.status(500).send("Failed to generate download: " + error.message);
   }
 });

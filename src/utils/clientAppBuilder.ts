@@ -318,7 +318,7 @@ export async function buildAndDownloadApp(
   // 1. Try server POST endpoint first (supports full image data URLs without query limit)
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    const timeout = setTimeout(() => controller.abort(), 25000);
 
     const postRes = await fetch("/api/download-app", {
       method: "POST",

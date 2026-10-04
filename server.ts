@@ -609,120 +609,6 @@ async function buildWindowsExe(url: string, appName: string, iconUrl?: string): 
       const escapedUrl = safeUrl.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
       const escapedName = safeName.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 
-      // Windows C source: Launches the URL in a dedicated, standalone application window
-      // (no browser chrome, no address bar, no tabs) and registers the EXE in Windows Startup.
-      const cSource = `#include <windows.h>
-#include <shellapi.h>
-
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
-    const wchar_t* targetUrl = L"${escapedUrl}";
-    const wchar_t* appName = L"${escapedName}";
-
-    // 1. Auto-register in Windows Startup (HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run)
-    HKEY hRunKey;
-    wchar_t currentExePath[MAX_PATH];
-    if (GetModuleFileNameW(NULL, currentExePath, MAX_PATH) > 0) {
-        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run", 0, KEY_SET_VALUE, &hRunKey) == ERROR_SUCCESS) {
-            RegSetValueExW(hRunKey, appName, 0, REG_SZ, (const BYTE*)currentExePath, (lstrlenW(currentExePath) + 1) * sizeof(wchar_t));
-            RegCloseKey(hRunKey);
-        }
-    }
-
-    // 2. Prepare isolated user data directory for true standalone application window
-    wchar_t rootDataDir[MAX_PATH];
-    wchar_t dataDir[MAX_PATH];
-    wchar_t firstRunPath[MAX_PATH];
-    wchar_t cmdArgs[4096];
-    wchar_t browserPath[MAX_PATH];
-    HINSTANCE hRes;
-
-    if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\WebsktopApps", rootDataDir, MAX_PATH) > 0) {
-        CreateDirectoryW(rootDataDir, NULL);
-    }
-    if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\WebsktopApps\\\\${escapedName}", dataDir, MAX_PATH) > 0) {
-        CreateDirectoryW(dataDir, NULL);
-    } else {
-        lstrcpyW(dataDir, rootDataDir);
-    }
-
-    // CRITICAL: Pre-create 'First Run' sentinel file in dataDir.
-    // This prevents Microsoft Edge and Google Chrome from displaying their "Welcome to Microsoft Edge",
-    // "Personalize your browser", sign-in wizards, and telemetry screens!
-    wsprintfW(firstRunPath, L"%s\\\\First Run", dataDir);
-    HANDLE hFirstRun = CreateFileW(firstRunPath, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hFirstRun != INVALID_HANDLE_VALUE) {
-        CloseHandle(hFirstRun);
-    }
-
-    // Standalone application flags:
-    // Opens in a dedicated window without browser chrome, tabs, search bar, Edge sidebars, Copilot button or first-run wizards
-    wsprintfW(cmdArgs, L"--app=\\"%s\\" --user-data-dir=\\"%s\\" --no-first-run --no-default-browser-check --disable-default-apps --disable-extensions --disable-features=msEdgeSidebar,msHub,msEdgePageSummary,msEdgeShare,EdgeFre,OptimizationHints --edge-skip-fre --disable-fre", targetUrl, dataDir);
-
-    // Browser search order (Prefers Google Chrome and Brave, then Microsoft Edge with First Run suppressed):
-    // 1. Google Chrome (64-bit)
-    if (ExpandEnvironmentStringsW(L"%ProgramFiles%\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe", browserPath, MAX_PATH) > 0 &&
-        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
-        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
-        if ((INT_PTR)hRes > 32) return 0;
-    }
-
-    // 2. Google Chrome (32-bit)
-    if (ExpandEnvironmentStringsW(L"%ProgramFiles(x86)%\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe", browserPath, MAX_PATH) > 0 &&
-        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
-        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
-        if ((INT_PTR)hRes > 32) return 0;
-    }
-
-    // 3. Google Chrome (LocalAppData)
-    if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\Google\\\\Chrome\\\\Application\\\\chrome.exe", browserPath, MAX_PATH) > 0 &&
-        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
-        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
-        if ((INT_PTR)hRes > 32) return 0;
-    }
-
-    // 4. Brave Browser (64-bit)
-    if (ExpandEnvironmentStringsW(L"%ProgramFiles%\\\\BraveSoftware\\\\Brave-Browser\\\\Application\\\\brave.exe", browserPath, MAX_PATH) > 0 &&
-        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
-        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
-        if ((INT_PTR)hRes > 32) return 0;
-    }
-
-    // 5. Brave Browser (LocalAppData)
-    if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\BraveSoftware\\\\Brave-Browser\\\\Application\\\\brave.exe", browserPath, MAX_PATH) > 0 &&
-        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
-        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
-        if ((INT_PTR)hRes > 32) return 0;
-    }
-
-    // 6. Microsoft Edge (64-bit) - with First Run suppressed
-    if (ExpandEnvironmentStringsW(L"%ProgramFiles%\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe", browserPath, MAX_PATH) > 0 &&
-        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
-        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
-        if ((INT_PTR)hRes > 32) return 0;
-    }
-
-    // 7. Microsoft Edge (32-bit)
-    if (ExpandEnvironmentStringsW(L"%ProgramFiles(x86)%\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe", browserPath, MAX_PATH) > 0 &&
-        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
-        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
-        if ((INT_PTR)hRes > 32) return 0;
-    }
-
-    // 8. Microsoft Edge (LocalAppData)
-    if (ExpandEnvironmentStringsW(L"%LocalAppData%\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe", browserPath, MAX_PATH) > 0 &&
-        GetFileAttributesW(browserPath) != INVALID_FILE_ATTRIBUTES) {
-        hRes = ShellExecuteW(NULL, L"open", browserPath, cmdArgs, NULL, SW_SHOWNORMAL);
-        if ((INT_PTR)hRes > 32) return 0;
-    }
-
-    // 9. Universal Fallback
-    ShellExecuteW(NULL, L"open", targetUrl, NULL, NULL, SW_SHOWNORMAL);
-    return 0;
-}
-`;
-      const cPath = path.join(tmpDir, "main.c");
-      fs.writeFileSync(cPath, cSource);
-
       // Ensure ico file exists and has valid Windows ICO format
       let safeIcoPath = icoPath;
       const defaultIco = fs.existsSync("/tmp/default_app.ico")
@@ -761,12 +647,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
       }
 
-      // Compile native Windows executable
+      // Compile native standalone Windows desktop window executable (WebView2 engine)
       const exePath = path.join(tmpDir, "app.exe");
       const webviewHeader = path.join(process.cwd(), "assets", "webview2", "webview.h");
       const webviewInclude = path.join(process.cwd(), "assets", "webview2", "include");
 
-      // Preferred path: Native Standalone WebView2 Desktop Window (own process, own window, custom picture on taskbar/task manager)
+      // Preferred path: Native Standalone WebView2 Desktop Window (own process, own isolated window, custom icon on taskbar & alt-tab)
       if (hasGxx && fs.existsSync(webviewHeader)) {
         const appId = `EchoApp.${safeName.replace(/[^a-zA-Z0-9]/g, "")}`;
         const cppSource = `#include <windows.h>
@@ -776,7 +662,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 #include "${webviewHeader}"
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
-    // 1. Separate Process AppUserModelID so Windows never groups this with Edge or Chrome
+    // 1. Dedicated Process AppUserModelID so Windows never groups this with Edge or Chrome
     typedef HRESULT (WINAPI *SetAppIdFn)(PCWSTR);
     HMODULE hShell = LoadLibraryA("shell32.dll");
     if (hShell) {
@@ -786,21 +672,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
     }
 
-    // 2. Windows Startup auto-registration
-    HKEY hRunKey;
-    wchar_t currentExePath[MAX_PATH];
-    if (GetModuleFileNameW(NULL, currentExePath, MAX_PATH) > 0) {
-        if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run", 0, KEY_SET_VALUE, &hRunKey) == ERROR_SUCCESS) {
-            RegSetValueExW(hRunKey, L"${escapedName}", 0, REG_SZ, (const BYTE*)currentExePath, (lstrlenW(currentExePath) + 1) * sizeof(wchar_t));
-            RegCloseKey(hRunKey);
-        }
-    }
-
     const char* targetUrl = "${escapedUrl}";
     const char* appTitle = "${escapedName}";
+    const wchar_t* appTitleW = L"${escapedName}";
 
     try {
-        webview::webview w(true, nullptr);
+        webview::webview w(false, nullptr);
         w.set_title(appTitle);
         w.set_size(1200, 800, WEBVIEW_HINT_NONE);
 
@@ -816,8 +693,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         w.run();
         return 0;
     } catch (...) {
-        ShellExecuteA(NULL, "open", targetUrl, NULL, NULL, SW_SHOWNORMAL);
-        return 0;
+        // Missing WebView2 Runtime prompt: Offers official Microsoft installer rather than launching into a browser
+        wchar_t msg[1024];
+        wsprintfW(msg, L"Microsoft WebView2 Runtime is required to run %s in its standalone desktop window without browser tabs.\\n\\nWould you like to install the official Microsoft WebView2 runtime now?", appTitleW);
+        int res = MessageBoxW(NULL, msg, appTitleW, MB_ICONINFORMATION | MB_YESNO | MB_DEFBUTTON1);
+        if (res == IDYES) {
+            ShellExecuteW(NULL, L"open", L"https://go.microsoft.com/fwlink/p/?LinkId=2124703", NULL, NULL, SW_SHOWNORMAL);
+        }
+        return 1;
     }
 }
 `;
@@ -827,44 +710,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         try {
           const resArg = resObjPath ? `"${resObjPath}"` : "";
           execSync(
-            `"${gxxCmd}" -std=c++14 -O2 -s "${cppPath}" ${resArg} -I"${webviewInclude}" -mwindows -lole32 -lshlwapi -lversion -o "${exePath}"`,
+            `"${gxxCmd}" -std=c++14 -O2 -s -static -static-libgcc -static-libstdc++ "${cppPath}" ${resArg} -I"${webviewInclude}" -mwindows -lole32 -lshlwapi -lversion -o "${exePath}"`,
             { timeout: 25000 }
           );
 
           if (fs.existsSync(exePath) && fs.statSync(exePath).size > 1000) {
             return fs.readFileSync(exePath);
           }
-        } catch {
-          // Fall back to C launcher below
+        } catch (gxxErr: any) {
+          console.warn("Direct g++ standalone compile failed, using standalone template fallback:", gxxErr.message);
         }
-      }
-
-      // Secondary path: Optimized C launcher
-      try {
-        if (resObjPath) {
-          try {
-            execSync(
-              `"${gccCmd}" -mwindows -O2 -s "${cPath}" "${resObjPath}" -o "${exePath}" -lshell32 -ladvapi32 -lshlwapi`,
-              { timeout: 20000 }
-            );
-          } catch {
-            execSync(
-              `"${gccCmd}" -mwindows -O2 -s "${cPath}" -o "${exePath}" -lshell32 -ladvapi32 -lshlwapi`,
-              { timeout: 20000 }
-            );
-          }
-        } else {
-          execSync(
-            `"${gccCmd}" -mwindows -O2 -s "${cPath}" -o "${exePath}" -lshell32 -ladvapi32 -lshlwapi`,
-            { timeout: 20000 }
-          );
-        }
-
-        if (fs.existsSync(exePath) && fs.statSync(exePath).size > 1000) {
-          return fs.readFileSync(exePath);
-        }
-      } catch {
-        // Fall back to template patching
       }
     } catch {
       // Fall back to template patching

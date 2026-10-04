@@ -507,7 +507,16 @@ class CompilationPipeline:
             script_path = os.path.join(temp_workdir, "app_launcher.py")
             wrapper_code = f"""# -*- coding: utf-8 -*-
 import sys
+import ctypes
 import webview
+
+# Set AppUserModelID so Windows taskbar isolates this window from Chrome and Edge
+try:
+    if sys.platform == "win32":
+        myappid = u"EchoApp.{safe_name}"
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+except Exception:
+    pass
 
 def main():
     window = webview.create_window(
@@ -519,7 +528,8 @@ def main():
         fullscreen=False,
         confirm_close=False
     )
-    webview.start(debug=False, user_agent="{USER_AGENT}")
+    # Strictly launch in native standalone WebView2 runtime (edgechromium)
+    webview.start(gui="edgechromium", debug=False, user_agent="{USER_AGENT}")
 
 if __name__ == "__main__":
     main()

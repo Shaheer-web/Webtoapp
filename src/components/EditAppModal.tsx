@@ -10,6 +10,7 @@ interface EditAppModalProps {
   onClose: () => void;
   onSave: (updated: AppProject) => void;
   onDelete: (id: string) => void;
+  isDark?: boolean;
 }
 
 export const EditAppModal: React.FC<EditAppModalProps> = ({
@@ -18,6 +19,7 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({
   onClose,
   onSave,
   onDelete,
+  isDark = false,
 }) => {
   const [name, setName] = useState(app?.name || "");
   const [url, setUrl] = useState(app?.url || "");
@@ -29,7 +31,6 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({
   const [isProcessingIcon, setIsProcessingIcon] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Update state when modal opens with a new app
   React.useEffect(() => {
     if (app) {
       setName(app.name);
@@ -42,8 +43,6 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({
   }, [app]);
 
   if (!isOpen || !app) return null;
-
-  const activeWebsiteIcon = iconUrl || getWebsiteFaviconUrl(url) || getWebsiteFallbackIcon(url);
 
   const handleProcessFile = async (file: File) => {
     setUploadError(null);
@@ -113,13 +112,27 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200/90 shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-        <div className="px-6 py-4 border-b border-slate-200/80 flex items-center justify-between bg-slate-50/50">
-          <h3 className="font-bold text-base text-slate-900">App Settings</h3>
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+      <div
+        className={`rounded-2xl max-w-md w-full border shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 ${
+          isDark
+            ? "bg-[#141416] border-[#2A2A2E] text-[#E5E3DF]"
+            : "bg-white border-[#E8E1D5] text-[#22201E]"
+        }`}
+      >
+        <div
+          className={`px-6 py-4 border-b flex items-center justify-between ${
+            isDark
+              ? "bg-[#1A1A1D] border-[#262629]"
+              : "bg-[#F7F4EE] border-[#EAE3D6]"
+          }`}
+        >
+          <h3 className="font-bold text-base">App Settings</h3>
           <button
             onClick={onClose}
-            className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+            className={`p-1.5 rounded-lg cursor-pointer transition-colors ${
+              isDark ? "text-[#938F8A] hover:text-white hover:bg-[#252528]" : "text-[#7B756D] hover:text-black hover:bg-[#EAE3D6]"
+            }`}
           >
             <X className="w-5 h-5" />
           </button>
@@ -127,7 +140,7 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div className="space-y-1">
-            <label className="block text-xs font-bold text-slate-700 uppercase">
+            <label className="block text-xs font-bold uppercase tracking-wider">
               App Name
             </label>
             <input
@@ -135,12 +148,16 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({
               required
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
+              className={`w-full px-3.5 py-2.5 rounded-xl text-sm transition-all border outline-none focus:ring-2 focus:ring-[#E28A74]/30 ${
+                isDark
+                  ? "bg-[#1E1E21] border-[#2E2E32] text-[#E5E3DF] focus:border-[#E28A74]"
+                  : "bg-[#FBF9F5] border-[#E0D8CB] text-[#22201E] focus:border-[#E28A74]"
+              }`}
             />
           </div>
 
           <div className="space-y-1">
-            <label className="block text-xs font-bold text-slate-700 uppercase">
+            <label className="block text-xs font-bold uppercase tracking-wider">
               Website URL
             </label>
             <input
@@ -148,197 +165,152 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({
               required
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
+              className={`w-full px-3.5 py-2.5 rounded-xl text-sm transition-all border outline-none focus:ring-2 focus:ring-[#E28A74]/30 ${
+                isDark
+                  ? "bg-[#1E1E21] border-[#2E2E32] text-[#E5E3DF] focus:border-[#E28A74]"
+                  : "bg-[#FBF9F5] border-[#E0D8CB] text-[#22201E] focus:border-[#E28A74]"
+              }`}
             />
           </div>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="block text-xs font-bold text-slate-700 uppercase">
+              <label className="block text-xs font-bold uppercase tracking-wider">
                 App Icon (Picture)
               </label>
-              <span className={`text-[10px] px-2 py-0.5 rounded border font-semibold ${
-                iconUrl
-                  ? "text-sky-700 bg-sky-50 border-sky-200"
-                  : "text-slate-600 bg-slate-50 border-slate-200"
-              }`}>
-                {isProcessingIcon
-                  ? "Optimizing Picture..."
-                  : iconUrl
-                  ? "Custom Picture Loaded"
-                  : "Auto-Detected Picture"}
-              </span>
             </div>
 
-            {/* Drag & Drop Upload Container */}
             <div
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
               className={`relative border-2 border-dashed rounded-xl p-3 transition-all ${
                 isDragging
-                  ? "border-sky-500 bg-sky-50/60 ring-2 ring-sky-300 scale-[1.01]"
-                  : "border-slate-300 bg-slate-50/50 hover:bg-slate-50"
+                  ? "border-[#E28A74] bg-[#E28A74]/10"
+                  : isDark
+                  ? "border-[#2A2A2E] bg-[#1A1A1D]/60"
+                  : "border-[#E4DDD1] bg-[#F7F4EE]/60"
               }`}
             >
               <input
-                type="file"
                 ref={fileInputRef}
+                type="file"
                 accept="image/png,image/jpeg,image/jpg,image/webp,image/x-icon,image/vnd.microsoft.icon,image/svg+xml,image/*"
-                onChange={handleFileChange}
                 className="hidden"
+                onChange={handleFileChange}
               />
 
               <div className="flex items-center space-x-3">
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  title="Click to select or change picture"
-                  className={`w-14 h-14 rounded-xl border bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-xs p-1 transition-all cursor-pointer group relative ${
-                    isProcessingIcon
-                      ? "border-sky-400 ring-2 ring-sky-300"
-                      : "border-slate-200 hover:border-sky-400 hover:ring-2 hover:ring-sky-200"
+                  className={`w-14 h-14 rounded-xl border flex items-center justify-center shrink-0 overflow-hidden p-1 cursor-pointer transition-all ${
+                    isDark ? "bg-[#252528] border-[#333336]" : "bg-white border-[#E8E1D5]"
                   }`}
                 >
                   {isProcessingIcon ? (
-                    <Loader2 className="w-6 h-6 text-sky-600 animate-spin" />
-                  ) : activeWebsiteIcon ? (
-                    <>
-                      <img
-                        src={activeWebsiteIcon}
-                        alt="Logo preview"
-                        className="w-full h-full object-contain rounded-lg"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = getWebsiteFallbackIcon(url);
-                        }}
-                      />
-                      <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg">
-                        <Upload className="w-4 h-4 text-white" />
-                      </div>
-                    </>
+                    <Loader2 className="w-6 h-6 text-[#E28A74] animate-spin" />
+                  ) : iconUrl ? (
+                    <img
+                      src={iconUrl}
+                      alt="App Icon"
+                      className="w-full h-full object-contain rounded-lg"
+                      onError={(e) => {
+                        const fb = getWebsiteFallbackIcon(url);
+                        if (fb && (e.target as HTMLImageElement).src !== fb) {
+                          (e.target as HTMLImageElement).src = fb;
+                        }
+                      }}
+                    />
                   ) : (
-                    <div className="w-9 h-9 rounded-lg bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-400 group-hover:text-sky-600">
-                      <ImageIcon className="w-5 h-5" />
-                    </div>
+                    <ImageIcon className="w-6 h-6 text-[#A5A19B]" />
                   )}
                 </button>
 
                 <div className="flex-1 min-w-0 space-y-1.5">
-                  <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                  <div className="flex items-center space-x-2">
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 active:bg-sky-800 px-3 py-1.5 rounded-lg transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      className="text-xs font-semibold text-white bg-[#E28A74] hover:bg-[#D47963] px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
                     >
-                      <Upload className="w-3.5 h-3.5" />
+                      <Upload className="w-3.5 h-3.5 inline mr-1" />
                       <span>{iconUrl ? "Change Picture" : "Upload Picture"}</span>
                     </button>
-
                     {iconUrl && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setIconUrl("");
-                          setUploadError(null);
-                        }}
-                        className="text-xs text-rose-500 hover:text-rose-700 font-medium px-1.5 py-1 hover:underline cursor-pointer"
+                        onClick={() => setIconUrl("")}
+                        className="text-xs text-rose-500 hover:underline cursor-pointer"
                       >
                         Reset
                       </button>
                     )}
-                    <span className="text-[11px] text-slate-400 hidden sm:inline">
-                      or drag &amp; drop image here
-                    </span>
                   </div>
-
                   <input
                     type="text"
                     value={iconUrl}
-                    onChange={(e) => {
-                      setIconUrl(e.target.value);
-                      setUploadError(null);
-                    }}
-                    placeholder="Or paste any image URL..."
-                    className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
+                    onChange={(e) => setIconUrl(e.target.value)}
+                    placeholder="Or paste image URL..."
+                    className={`w-full px-3 py-1.5 rounded-lg text-xs border outline-none ${
+                      isDark
+                        ? "bg-[#1E1E21] border-[#2E2E32] text-[#E5E3DF]"
+                        : "bg-white border-[#E0D8CB] text-[#22201E]"
+                    }`}
                   />
                 </div>
               </div>
 
               {uploadError && (
-                <div className="mt-2 text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                <div className="mt-2 text-xs text-rose-500 flex items-center gap-1.5">
                   <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                   <span>{uploadError}</span>
                 </div>
               )}
-
-              <p className="mt-1.5 text-[10px] text-slate-400">
-                Supports PNG, JPG, JPEG, WEBP, ICO, SVG. Rescaled and embedded into Windows .EXE &amp; Android .APK.
-              </p>
             </div>
           </div>
 
-          <div className="space-y-1">
-            <label className="block text-xs font-bold text-slate-700 uppercase">
-              Description (optional)
-            </label>
-            <input
-              type="text"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="e.g. My favorite communication app"
-              className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
-            />
-          </div>
-
-          <div className="pt-2 border-t border-slate-100">
+          <div className="pt-2 flex items-center justify-between">
             {confirmDelete ? (
-              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl space-y-2 animate-in fade-in duration-150">
-                <p className="text-xs font-bold text-rose-900">
-                  Delete "{app.name}" permanently?
-                </p>
-                <p className="text-[11px] text-rose-700">
-                  All local data for this app will be deleted.
-                </p>
-                <div className="flex items-center space-x-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onDelete(app.id);
-                      onClose();
-                    }}
-                    className="flex-1 py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer"
-                  >
-                    Yes, Delete Project
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmDelete(false)}
-                    className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 font-medium text-xs rounded-lg border border-slate-200 transition-colors cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center justify-between space-x-3">
+              <div className="flex items-center space-x-2">
                 <button
                   type="button"
-                  onClick={() => setConfirmDelete(true)}
-                  className="py-2.5 px-3.5 text-rose-600 hover:bg-rose-50 border border-rose-200 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition-colors cursor-pointer"
+                  onClick={() => {
+                    onDelete(app.id);
+                    onClose();
+                  }}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-lg cursor-pointer"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Delete</span>
+                  Confirm Delete
                 </button>
-
                 <button
-                  type="submit"
-                  className="flex-1 py-2.5 px-4 bg-sky-600 hover:bg-sky-700 text-white font-semibold text-xs rounded-xl flex items-center justify-center space-x-1.5 transition-colors shadow-xs cursor-pointer"
+                  type="button"
+                  onClick={() => setConfirmDelete(false)}
+                  className={`px-3 py-1.5 text-xs font-medium rounded-lg border cursor-pointer ${
+                    isDark ? "bg-[#1E1E21] border-[#2E2E32] text-[#A5A19B]" : "bg-white border-[#E0D8CB] text-[#6B655D]"
+                  }`}
                 >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Save Changes</span>
+                  Cancel
                 </button>
               </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(true)}
+                className="text-xs text-rose-500 hover:text-rose-600 font-medium inline-flex items-center gap-1 cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Project</span>
+              </button>
             )}
+
+            <button
+              type="submit"
+              className="py-2 px-4 bg-[#E28A74] hover:bg-[#D47963] active:bg-[#C26B56] text-white font-bold text-xs rounded-xl shadow-xs inline-flex items-center gap-1.5 cursor-pointer"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>Save Changes</span>
+            </button>
           </div>
         </form>
       </div>

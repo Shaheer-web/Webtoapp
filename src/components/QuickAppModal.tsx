@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import {
   X,
   Globe,
@@ -21,12 +21,14 @@ interface QuickAppModalProps {
   isOpen: boolean;
   onClose: () => void;
   onCreateApp: (app: AppProject) => void;
+  isDark?: boolean;
 }
 
 export const QuickAppModal: React.FC<QuickAppModalProps> = ({
   isOpen,
   onClose,
   onCreateApp,
+  isDark = false,
 }) => {
   const [url, setUrl] = useState("");
   const [name, setName] = useState("");
@@ -49,7 +51,6 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
     const trimmed = inputUrl.trim();
     if (!trimmed || trimmed.length < 3) return;
 
-    // Must look like a domain or URL
     if (!force && !trimmed.includes(".") && !trimmed.startsWith("http")) {
       return;
     }
@@ -59,7 +60,6 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
       formatted = "https://" + formatted.replace(/^\/\//, "");
     }
 
-    // Cancel any previous pending request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -101,46 +101,41 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
     }
   }, [name]);
 
-  // Trigger on typing with instant brand detection + debounced deep probe
   const handleUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newVal = e.target.value;
-    setUrl(newVal);
-
-    // Instant local domain/brand check
-    const brand = detectWebsiteBrand(newVal);
-    if (brand) {
-      if (!userEditedNameRef.current || !name.trim()) {
-        setName(brand.name);
-      }
-      if (!userEditedIconRef.current) {
-        setIconUrl(brand.faviconUrl);
-      }
-      setDetectedSuccess(true);
-    }
+    const val = e.target.value;
+    setUrl(val);
 
     if (debounceTimerRef.current) {
       clearTimeout(debounceTimerRef.current);
     }
 
-    if (newVal.trim().includes(".")) {
-      debounceTimerRef.current = setTimeout(() => {
-        detectMetadata(newVal, false);
-      }, 300);
+    const trimmed = val.trim();
+    if (!trimmed) {
+      setDetectedSuccess(false);
+      return;
     }
+
+    debounceTimerRef.current = setTimeout(() => {
+      detectMetadata(trimmed, false);
+    }, 600);
   };
 
-  // Instant trigger on paste
   const handleUrlPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
-    const pastedText = e.clipboardData.getData("text");
-    if (pastedText) {
-      const brand = detectWebsiteBrand(pastedText);
-      if (brand) {
-        if (!userEditedNameRef.current || !name.trim()) {
-          setName(brand.name);
-        }
-        if (!userEditedIconRef.current) {
-          setIconUrl(brand.faviconUrl);
-        }
+    const pasted = e.clipboardData.getData("text").trim();
+    if (pasted && (pasted.includes(".") || pasted.startsWith("http"))) {
+      let formatted = pasted;
+      if (!/^https?:\/\//i.test(formatted)) {
+        formatted = "https://" + formatted.replace(/^\/\//, "");
+      }
+
+      if (!userEditedIconRef.current) {
+        const autoIcon = getWebsiteFaviconUrl(formatted) || getWebsiteFallbackIcon(formatted);
+        setIconUrl(autoIcon);
+      }
+
+      const brand = detectWebsiteBrand(formatted);
+      if (brand && (!userEditedNameRef.current || !name.trim())) {
+        setName(brand.name);
         setDetectedSuccess(true);
       }
 
@@ -148,7 +143,7 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
         clearTimeout(debounceTimerRef.current);
       }
       setTimeout(() => {
-        detectMetadata(pastedText, true);
+        detectMetadata(pasted, true);
       }, 50);
     }
   };
@@ -159,13 +154,11 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
     }
   };
 
-  // Track if user manually changes name
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     userEditedNameRef.current = true;
     setName(e.target.value);
   };
 
-  // Upload custom icon helper
   const handleProcessFile = async (file: File) => {
     setUploadError(null);
     const check = validateImageFile(file);
@@ -273,22 +266,38 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200/90 shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+      <div
+        className={`rounded-2xl max-w-md w-full border shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 ${
+          isDark
+            ? "bg-[#141416] border-[#2A2A2E] text-[#E5E3DF]"
+            : "bg-white border-[#E8E1D5] text-[#22201E]"
+        }`}
+      >
         {/* Modal Header */}
-        <div className="px-6 py-4 border-b border-slate-200/80 flex items-center justify-between bg-slate-50/50">
-          <div className="flex items-center space-x-2">
-            <div className="w-7 h-7 rounded-lg bg-sky-600 flex items-center justify-center text-white shadow-xs">
+        <div
+          className={`px-6 py-4 border-b flex items-center justify-between ${
+            isDark
+              ? "bg-[#1A1A1D] border-[#262629]"
+              : "bg-[#F7F4EE] border-[#EAE3D6]"
+          }`}
+        >
+          <div className="flex items-center space-x-2.5">
+            <div className="w-8 h-8 rounded-xl bg-[#E28A74] flex items-center justify-center text-white shadow-xs">
               <Sparkles className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="font-bold text-base text-slate-900 leading-tight">Quick App Creation</h3>
-              <p className="text-[11px] text-slate-500">Auto-detects name, logo, and converts in seconds</p>
+              <h3 className="font-bold text-base leading-tight">Quick App Creation</h3>
+              <p className={`text-[11px] ${isDark ? "text-[#938F8A]" : "text-[#7B756D]"}`}>
+                Auto-detects name, logo &amp; generates .EXE &amp; .APK
+              </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors"
+            className={`p-1.5 rounded-lg cursor-pointer transition-colors ${
+              isDark ? "text-[#938F8A] hover:text-white hover:bg-[#252528]" : "text-[#7B756D] hover:text-black hover:bg-[#EAE3D6]"
+            }`}
           >
             <X className="w-5 h-5" />
           </button>
@@ -299,25 +308,23 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
           {/* 1. URL */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                1. Website URL <span className="text-sky-600">*</span>
+              <label className="block text-xs font-bold uppercase tracking-wider">
+                Website URL <span className="text-[#E28A74]">*</span>
               </label>
               {isValidating ? (
-                <span className="text-[11px] text-sky-600 font-medium inline-flex items-center gap-1 animate-pulse">
+                <span className="text-[11px] text-[#E28A74] font-medium inline-flex items-center gap-1 animate-pulse">
                   <Loader2 className="w-3 h-3 animate-spin" />
-                  Auto-detecting logo &amp; name...
+                  Auto-detecting...
                 </span>
               ) : detectedSuccess ? (
-                <span className="text-[11px] text-emerald-600 font-semibold inline-flex items-center gap-1 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                  <Check className="w-3 h-3 text-emerald-600" />
+                <span className="text-[11px] text-[#22C55E] font-semibold inline-flex items-center gap-1">
+                  <Check className="w-3 h-3" />
                   Auto-detected!
                 </span>
-              ) : (
-                <span className="text-[10px] text-slate-400">Any URL or deep link (e.g. discord.com/channel)</span>
-              )}
+              ) : null}
             </div>
             <div className="relative">
-              <div className="absolute left-3 top-3 text-slate-400">
+              <div className="absolute left-3 top-3 text-[#A5A19B]">
                 <Globe className="w-4 h-4" />
               </div>
               <input
@@ -327,40 +334,36 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
                 onChange={handleUrlChange}
                 onPaste={handleUrlPaste}
                 onBlur={handleUrlBlur}
-                placeholder="Paste link: e.g. discord.com/channel, youtube.com/watch?v=..., github.com"
-                className="w-full pl-9 pr-10 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-slate-900 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all"
+                placeholder="Paste link: e.g. discord.com, youtube.com, github.com"
+                className={`w-full pl-9 pr-10 py-2.5 rounded-xl text-sm transition-all border outline-none focus:ring-2 focus:ring-[#E28A74]/30 ${
+                  isDark
+                    ? "bg-[#1E1E21] border-[#2E2E32] text-[#E5E3DF] focus:border-[#E28A74]"
+                    : "bg-[#FBF9F5] border-[#E0D8CB] text-[#22201E] focus:border-[#E28A74]"
+                }`}
               />
               <div className="absolute right-3 top-3 flex items-center">
                 {isValidating ? (
-                  <Loader2 className="w-4 h-4 text-sky-600 animate-spin" />
+                  <Loader2 className="w-4 h-4 text-[#E28A74] animate-spin" />
                 ) : (
                   <button
                     type="button"
                     onClick={() => detectMetadata(url, true)}
                     title="Auto-detect name & logo"
-                    className="text-slate-400 hover:text-sky-600 transition-colors p-0.5"
+                    className="text-[#A5A19B] hover:text-[#E28A74] transition-colors p-0.5"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
             </div>
-            <p className="text-[11px] text-slate-500">
-              Instant auto-detection: paste any link and we immediately fetch the official title and logo!
-            </p>
           </div>
 
           {/* 2. Name */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                2. App Name <span className="text-sky-600">*</span>
+              <label className="block text-xs font-bold uppercase tracking-wider">
+                App Name <span className="text-[#E28A74]">*</span>
               </label>
-              {name && (
-                <span className="text-[10px] text-slate-400">
-                  {userEditedNameRef.current ? "Custom Name" : "Auto-detected"}
-                </span>
-              )}
             </div>
             <div className="relative">
               <input
@@ -368,9 +371,11 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
                 required
                 value={name}
                 onChange={handleNameChange}
-                placeholder={isValidating ? "Detecting name..." : "e.g. Discord, YouTube, My App"}
-                className={`w-full px-3.5 py-2.5 bg-slate-50 border rounded-xl text-slate-900 text-sm focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500 transition-all ${
-                  isValidating ? "border-sky-300 bg-sky-50/30" : "border-slate-300"
+                placeholder={isValidating ? "Detecting name..." : "e.g. Discord, YouTube, My Web App"}
+                className={`w-full px-3.5 py-2.5 rounded-xl text-sm transition-all border outline-none focus:ring-2 focus:ring-[#E28A74]/30 ${
+                  isDark
+                    ? "bg-[#1E1E21] border-[#2E2E32] text-[#E5E3DF] focus:border-[#E28A74]"
+                    : "bg-[#FBF9F5] border-[#E0D8CB] text-[#22201E] focus:border-[#E28A74]"
                 }`}
               />
             </div>
@@ -379,25 +384,23 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
           {/* 3. Icon */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                3. App Icon (Picture)
+              <label className="block text-xs font-bold uppercase tracking-wider">
+                App Icon (Picture)
               </label>
-              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${
+              <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
                 userEditedIconRef.current
-                  ? "text-sky-700 bg-sky-50 border-sky-200"
+                  ? "text-[#E28A74] bg-[#E28A74]/10"
                   : iconUrl
-                  ? "text-emerald-700 bg-emerald-50 border-emerald-200"
-                  : "text-slate-600 bg-slate-50 border-slate-200"
+                  ? "text-[#22C55E] bg-[#22C55E]/10"
+                  : "text-[#8E8B87]"
               }`}>
                 {isProcessingIcon
-                  ? "Optimizing Picture..."
-                  : isValidating
-                  ? "Fetching website picture..."
+                  ? "Processing..."
                   : userEditedIconRef.current
-                  ? "Custom Picture Uploaded"
+                  ? "Custom Picture"
                   : iconUrl
-                  ? "Website Picture Auto-Detected"
-                  : "Auto-detects from URL or Upload"}
+                  ? "Auto-Detected"
+                  : "Auto or Upload"}
               </span>
             </div>
 
@@ -408,8 +411,10 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
               onDrop={handleDrop}
               className={`relative border-2 border-dashed rounded-xl p-3 transition-all ${
                 isDragging
-                  ? "border-sky-500 bg-sky-50/60 ring-2 ring-sky-300 scale-[1.01]"
-                  : "border-slate-300 bg-slate-50/50 hover:bg-slate-50"
+                  ? "border-[#E28A74] bg-[#E28A74]/10 scale-[1.01]"
+                  : isDark
+                  ? "border-[#2A2A2E] bg-[#1A1A1D]/60"
+                  : "border-[#E4DDD1] bg-[#F7F4EE]/60"
               }`}
             >
               <input
@@ -421,51 +426,42 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
               />
 
               <div className="flex items-center space-x-3">
-                {/* Clickable Icon Box */}
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  title="Click to select or change picture"
-                  className={`w-14 h-14 rounded-xl border bg-white flex items-center justify-center shrink-0 overflow-hidden shadow-xs p-1 transition-all cursor-pointer group relative ${
-                    isProcessingIcon
-                      ? "border-sky-400 ring-2 ring-sky-300"
-                      : "border-slate-200 hover:border-sky-400 hover:ring-2 hover:ring-sky-200"
+                  title="Click to select picture"
+                  className={`w-14 h-14 rounded-xl border flex items-center justify-center shrink-0 overflow-hidden p-1 cursor-pointer transition-all ${
+                    isDark
+                      ? "bg-[#252528] border-[#333336]"
+                      : "bg-white border-[#E8E1D5]"
                   }`}
                 >
                   {isProcessingIcon ? (
-                    <Loader2 className="w-6 h-6 text-sky-600 animate-spin" />
+                    <Loader2 className="w-6 h-6 text-[#E28A74] animate-spin" />
                   ) : iconUrl ? (
-                    <>
-                      <img
-                        src={iconUrl}
-                        alt="App Icon"
-                        className="w-full h-full object-contain rounded-lg"
-                        onError={(e) => {
-                          if (userEditedIconRef.current) return;
-                          const fb = getWebsiteFallbackIcon(url);
-                          if (fb && (e.target as HTMLImageElement).src !== fb) {
-                            (e.target as HTMLImageElement).src = fb;
-                          }
-                        }}
-                      />
-                      <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg">
-                        <Upload className="w-4 h-4 text-white" />
-                      </div>
-                    </>
+                    <img
+                      src={iconUrl}
+                      alt="App Icon"
+                      className="w-full h-full object-contain rounded-lg"
+                      onError={(e) => {
+                        if (userEditedIconRef.current) return;
+                        const fb = getWebsiteFallbackIcon(url);
+                        if (fb && (e.target as HTMLImageElement).src !== fb) {
+                          (e.target as HTMLImageElement).src = fb;
+                        }
+                      }}
+                    />
                   ) : (
-                    <div className="flex flex-col items-center justify-center text-slate-400 group-hover:text-sky-600">
-                      <ImageIcon className="w-6 h-6 stroke-[1.5]" />
-                    </div>
+                    <ImageIcon className="w-6 h-6 text-[#A5A19B]" />
                   )}
                 </button>
 
-                {/* Upload Action and Dropzone info */}
                 <div className="flex-1 min-w-0 space-y-1.5">
                   <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 active:bg-sky-800 px-3 py-1.5 rounded-lg transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      className="text-xs font-semibold text-white bg-[#E28A74] hover:bg-[#D47963] px-3 py-1.5 rounded-lg transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
                     >
                       <Upload className="w-3.5 h-3.5" />
                       <span>{iconUrl ? "Change Picture" : "Upload Picture"}</span>
@@ -478,14 +474,11 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
                           setIconUrl("");
                           setUploadError(null);
                         }}
-                        className="text-xs text-rose-500 hover:text-rose-700 font-medium px-1.5 py-1 hover:underline cursor-pointer"
+                        className="text-xs text-rose-500 hover:underline cursor-pointer"
                       >
                         Reset
                       </button>
                     )}
-                    <span className="text-[11px] text-slate-400 hidden sm:inline">
-                      or drag &amp; drop image here
-                    </span>
                   </div>
 
                   <input
@@ -496,34 +489,22 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
                       setIconUrl(e.target.value);
                       setUploadError(null);
                     }}
-                    placeholder="Or paste any image URL..."
-                    className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-900 text-xs focus:outline-none focus:ring-2 focus:ring-sky-500/20 focus:border-sky-500"
+                    placeholder="Or paste image URL..."
+                    className={`w-full px-3 py-1.5 rounded-lg text-xs border outline-none ${
+                      isDark
+                        ? "bg-[#1E1E21] border-[#2E2E32] text-[#E5E3DF]"
+                        : "bg-white border-[#E0D8CB] text-[#22201E]"
+                    }`}
                   />
                 </div>
               </div>
 
               {uploadError && (
-                <div className="mt-2 text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                <div className="mt-2 text-xs text-rose-500 flex items-center gap-1.5">
                   <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                   <span>{uploadError}</span>
                 </div>
               )}
-
-              <p className="mt-1.5 text-[10px] text-slate-400">
-                Supports PNG, JPG, JPEG, WEBP, ICO, SVG. Automatically optimized and embedded into Windows .EXE &amp; Android .APK.
-              </p>
-            </div>
-          </div>
-
-          {/* Target preview badge */}
-          <div className="bg-sky-50/60 border border-sky-200/80 rounded-xl p-3 flex items-center justify-between text-xs text-sky-950 font-medium">
-            <span className="flex items-center gap-1.5">
-              <CheckCircle2 className="w-4 h-4 text-sky-600" />
-              <span>Creates both <strong>.EXE</strong> and <strong>.APK</strong></span>
-            </span>
-            <div className="flex items-center space-x-1 text-sky-600">
-              <Monitor className="w-4 h-4" />
-              <Smartphone className="w-4 h-4" />
             </div>
           </div>
 
@@ -531,7 +512,7 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
           <div className="pt-2">
             <button
               type="submit"
-              className="w-full py-2.5 px-4 bg-sky-600 hover:bg-sky-700 active:bg-sky-800 text-white font-bold text-sm rounded-xl transition-colors shadow-xs flex items-center justify-center space-x-2 cursor-pointer"
+              className="w-full py-2.5 px-4 bg-[#E28A74] hover:bg-[#D47963] active:bg-[#C26B56] text-white font-bold text-sm rounded-xl transition-all shadow-xs flex items-center justify-center space-x-2 cursor-pointer"
             >
               <Sparkles className="w-4 h-4" />
               <span>Create &amp; Download App</span>

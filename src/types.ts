@@ -1,4 +1,7 @@
-export const ECHO_LOGO_URL = "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSYcIQWfKm61CCUiN_fQXj55cBN9_HVXzway2Tkhl5COx4HCm3L8TANtBtR&s=10";
+export const SAPPHIRE_LOGO_URL = "/sapphire_logo.svg";
+export const ECHO_LOGO_URL = "/sapphire_logo.svg";
+
+export type ThemeMode = "light" | "dark";
 
 export interface AppProject {
   id: string;

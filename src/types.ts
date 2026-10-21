@@ -1,5 +1,5 @@
-export const SAPPHIRE_LOGO_URL = "/sapphire_logo.svg";
-export const ECHO_LOGO_URL = "/sapphire_logo.svg";
+export const SAPPHIRE_LOGO_URL = "https://i.ibb.co/cSJdk808/icon.png";
+export const ECHO_LOGO_URL = "https://i.ibb.co/cSJdk808/icon.png";
 
 export type ThemeMode = "light" | "dark";
 

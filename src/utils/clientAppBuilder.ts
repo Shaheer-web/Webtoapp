@@ -138,14 +138,23 @@ async function fetchIconArrayBuffer(iconUrl?: string, pageUrl?: string): Promise
   }
 
   const urlsToTry: string[] = [];
-  if (iconUrl && (iconUrl.startsWith("http://") || iconUrl.startsWith("https://"))) {
-    urlsToTry.push(iconUrl);
+  if (iconUrl) {
+    if (iconUrl.startsWith("http://") || iconUrl.startsWith("https://")) {
+      urlsToTry.push(`/api/fetch-icon?url=${encodeURIComponent(iconUrl)}`);
+      urlsToTry.push(iconUrl);
+    }
   }
   if (pageUrl) {
     const gFavicon = getWebsiteFaviconUrl(pageUrl);
-    if (gFavicon) urlsToTry.push(gFavicon);
+    if (gFavicon) {
+      urlsToTry.push(`/api/fetch-icon?url=${encodeURIComponent(gFavicon)}`);
+      urlsToTry.push(gFavicon);
+    }
     const duckFavicon = getWebsiteFallbackIcon(pageUrl);
-    if (duckFavicon) urlsToTry.push(duckFavicon);
+    if (duckFavicon) {
+      urlsToTry.push(`/api/fetch-icon?url=${encodeURIComponent(duckFavicon)}`);
+      urlsToTry.push(duckFavicon);
+    }
   }
 
   for (const u of urlsToTry) {
@@ -238,6 +247,12 @@ export async function buildClientAndroidApk(
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <application
         android:label="${safeName}"

@@ -35,6 +35,24 @@ const KNOWN_BRANDS: Record<string, string> = {
   "trello.com": "Trello",
   "canva.com": "Canva",
   "soundcloud.com": "SoundCloud",
+  "google.com": "Google",
+};
+
+const KNOWN_ICONS: Record<string, string> = {
+  "google.com": "https://www.google.com/images/branding/googleg/1x/googleg_standard_color_128dp.png",
+  "youtube.com": "https://www.gstatic.com/youtube/img/branding/favicon/favicon_144x144.png",
+  "youtu.be": "https://www.gstatic.com/youtube/img/branding/favicon/favicon_144x144.png",
+  "discord.com": "https://assets-global.website-files.com/6257adef93867e50d84d30e2/636e0a6a49cf127bf92de1e2_icon_clyde_blurple_RGB.png",
+  "discord.gg": "https://assets-global.website-files.com/6257adef93867e50d84d30e2/636e0a6a49cf127bf92de1e2_icon_clyde_blurple_RGB.png",
+  "github.com": "https://github.githubassets.com/favicons/favicon.png",
+  "chatgpt.com": "https://openai.com/favicon.ico",
+  "openai.com": "https://openai.com/favicon.ico",
+  "twitch.tv": "https://static.twitchcdn.net/assets/favicon-32-e29e246c157148d94414.png",
+  "spotify.com": "https://open.spotifycdn.com/cdn/images/favicon.0f31d2ea.ico",
+  "instagram.com": "https://static.cdninstagram.com/rsrc.php/v3/yI/r/VsNE-OHk_8a.png",
+  "twitter.com": "https://abs.twimg.com/favicons/twitter.3.ico",
+  "x.com": "https://abs.twimg.com/favicons/twitter.3.ico",
+  "reddit.com": "https://www.redditstatic.com/shreddit/assets/favicon/192x192.png",
 };
 
 export function cleanHostname(urlOrDomain: string): string {
@@ -61,8 +79,16 @@ export function cleanHostname(urlOrDomain: string): string {
 
 export function getWebsiteFaviconUrl(urlOrDomain: string, sz = 256): string {
   const host = cleanHostname(urlOrDomain);
-  if (!host || host.length < 3 || !host.includes(".")) {
-    return "";
+  if (!host) return "";
+  if (KNOWN_ICONS[host]) {
+    return KNOWN_ICONS[host];
+  }
+  const parts = host.split(".");
+  if (parts.length > 2) {
+    const root = parts.slice(-2).join(".");
+    if (KNOWN_ICONS[root]) {
+      return KNOWN_ICONS[root];
+    }
   }
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=${sz}`;
 }

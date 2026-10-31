@@ -101,6 +101,20 @@ function cleanAppTitle(rawTitle: string, hostname: string): string {
   return t.length > 30 ? t.slice(0, 30).trim() : t;
 }
 
+// Proxy fetch icon endpoint to avoid CORS issues for remote URL icons (e.g. ImgBB icons)
+app.get("/api/fetch-icon", async (req, res) => {
+  try {
+    const iconUrl = req.query.url as string;
+    if (!iconUrl) return res.status(400).send("URL required");
+    const buf = await getIconBuffer(iconUrl);
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Content-Type", "image/png");
+    return res.end(buf);
+  } catch (err: any) {
+    return res.status(500).send(err.message);
+  }
+});
+
 // URL Validation & Auto-Detection Probe
 app.post("/api/validate-url", async (req, res) => {
   try {
@@ -779,6 +793,12 @@ async function buildAndroidApk(url: string, appName: string, packageId: string, 
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
     <application
         android:label="${escapedName}"

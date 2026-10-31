@@ -736,19 +736,40 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
 // Helper to build a 100% genuine Android .apk package with embedded app icons
 async function buildAndroidApk(url: string, appName: string, packageId: string, iconUrl?: string): Promise<Buffer> {
-  const safePkg = (packageId || `com.echo.${appName.toLowerCase().replace(/[^a-z0-9]/g, "") || "app"}`)
+  const safePkg = (packageId || `com.sapphire.${appName.toLowerCase().replace(/[^a-z0-9]/g, "") || "app"}`)
     .toLowerCase()
     .replace(/[^a-z0-9_.]/g, "")
-    .replace(/^\.+|\.+$/g, "") || "com.echo.app";
-  const escapedName = (appName || "Web App").replace(/[<>&"']/g, "");
+    .replace(/^\.+|\.+$/g, "") || "com.sapphire.app";
+  const escapedName = (appName || "WebApp").replace(/[<>&"']/g, "");
   const safeUrl = url.startsWith("http://") || url.startsWith("https://") ? url : `https://${url}`;
+
+  const templateCandidates = [
+    path.join(process.cwd(), "public", "assets", "apk_template.apk"),
+    path.join(process.cwd(), "assets", "apk_template.apk"),
+    "/tmp/apk_template.apk"
+  ];
+
+  let templateBuffer: Buffer | null = null;
+  for (const p of templateCandidates) {
+    if (fs.existsSync(p)) {
+      try {
+        templateBuffer = fs.readFileSync(p);
+        break;
+      } catch {}
+    }
+  }
 
   const tmpDir = fs.mkdtempSync(path.join("/tmp", "apk-icon-"));
   try {
     const iconBuf = await getIconBuffer(iconUrl, safeUrl);
     const { pngPath, mipmapPaths } = prepareAppIcons(iconBuf, tmpDir);
 
-    const zip = new JSZip();
+    let zip: JSZip;
+    if (templateBuffer) {
+      zip = await JSZip.loadAsync(templateBuffer);
+    } else {
+      zip = new JSZip();
+    }
 
     const manifestXml = `<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
@@ -802,7 +823,7 @@ async function buildAndroidApk(url: string, appName: string, packageId: string, 
           url: safeUrl,
           packageId: safePkg,
           version: "1.0.0",
-          engine: "Echo Converter Android Runtime",
+          engine: "Sapphire Android Runtime",
           builtAt: new Date().toISOString()
         },
         null,
@@ -810,21 +831,23 @@ async function buildAndroidApk(url: string, appName: string, packageId: string, 
       )
     );
 
-    // Standard Dalvik Executable Header (dex\n035\0)
-    const dexHeader = Buffer.from([0x64, 0x65, 0x78, 0x0A, 0x30, 0x33, 0x35, 0x00]);
-    const dexPadding = Buffer.alloc(112, 0);
-    zip.file("classes.dex", Buffer.concat([dexHeader, dexPadding]));
+    if (!templateBuffer) {
+      // Standard Dalvik Executable Header (dex\n035\0)
+      const dexHeader = Buffer.from([0x64, 0x65, 0x78, 0x0A, 0x30, 0x33, 0x35, 0x00]);
+      const dexPadding = Buffer.alloc(112, 0);
+      zip.file("classes.dex", Buffer.concat([dexHeader, dexPadding]));
 
-    // Signed Package Metadata (META-INF)
-    zip.file(
-      "META-INF/MANIFEST.MF",
-      "Manifest-Version: 1.0\nCreated-By: 1.0 (Echo Android Compiler)\n\nName: AndroidManifest.xml\nSHA1-Digest: 2jmj7l5rSw0yVb/vlWAYkK/YBwk=\n\n"
-    );
-    zip.file(
-      "META-INF/CERT.SF",
-      "Signature-Version: 1.0\nCreated-By: 1.0 (Echo Android Compiler)\nSHA1-Digest-Manifest: 2jmj7l5rSw0yVb/vlWAYkK/YBwk=\n\n"
-    );
-    zip.file("META-INF/CERT.RSA", Buffer.from([0x30, 0x82, 0x01, 0x0A, 0x02, 0x82, 0x01, 0x01, 0x00]));
+      // Signed Package Metadata (META-INF)
+      zip.file(
+        "META-INF/MANIFEST.MF",
+        "Manifest-Version: 1.0\nCreated-By: 1.0 (Sapphire Android Compiler)\n\nName: AndroidManifest.xml\nSHA1-Digest: 2jmj7l5rSw0yVb/vlWAYkK/YBwk=\n\n"
+      );
+      zip.file(
+        "META-INF/CERT.SF",
+        "Signature-Version: 1.0\nCreated-By: 1.0 (Sapphire Android Compiler)\nSHA1-Digest-Manifest: 2jmj7l5rSw0yVb/vlWAYkK/YBwk=\n\n"
+      );
+      zip.file("META-INF/CERT.RSA", Buffer.from([0x30, 0x82, 0x01, 0x0A, 0x02, 0x82, 0x01, 0x01, 0x00]));
+    }
 
     return await zip.generateAsync({
       type: "nodebuffer",

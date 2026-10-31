@@ -7,7 +7,7 @@ interface SapphireLogoProps {
 }
 
 /**
- * Sapphire Official Logo from https://i.ibb.co/cSJdk808/icon.png
+ * Sapphire Official Logo from https://i.ibb.co/cSJdk808/icon.png (cached locally as /sapphire_logo.png)
  */
 export const SapphireLogo: React.FC<SapphireLogoProps> = ({
   className = "",
@@ -15,8 +15,7 @@ export const SapphireLogo: React.FC<SapphireLogoProps> = ({
   variant = "badge",
 }) => {
   const [imgError, setImgError] = useState(false);
-  const logoUrl = "https://i.ibb.co/cSJdk808/icon.png";
-  const localFallbackUrl = "/sapphire_logo.png";
+  const logoUrl = "/sapphire_logo.png";
 
   if (!imgError) {
     return (
@@ -31,14 +30,7 @@ export const SapphireLogo: React.FC<SapphireLogoProps> = ({
           alt="Sapphire Logo"
           style={{ width: "100%", height: "100%" }}
           className="object-contain"
-          onError={(e) => {
-            const target = e.target as HTMLImageElement;
-            if (target.src !== window.location.origin + localFallbackUrl) {
-              target.src = localFallbackUrl;
-            } else {
-              setImgError(true);
-            }
-          }}
+          onError={() => setImgError(true)}
         />
       </div>
     );

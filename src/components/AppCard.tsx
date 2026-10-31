@@ -24,7 +24,7 @@ export const AppCard: React.FC<AppCardProps> = ({
   const [downloading, setDownloading] = useState<"exe" | "apk" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
-  const websiteIcon = app.iconUrl || getWebsiteFaviconUrl(app.url) || getWebsiteFallbackIcon(app.url);
+  const websiteIcon = app.iconUrl || "https://i.ibb.co/cSJdk808/icon.png";
 
   const handleDirectDownload = async (type: "exe" | "apk") => {
     setDownloading(type);

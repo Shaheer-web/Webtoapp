@@ -23,7 +23,7 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({
 }) => {
   const [name, setName] = useState(app?.name || "");
   const [url, setUrl] = useState(app?.url || "");
-  const [iconUrl, setIconUrl] = useState(app?.iconUrl || "");
+  const [iconUrl, setIconUrl] = useState(app?.iconUrl || "https://i.ibb.co/cSJdk808/icon.png");
   const [description, setDescription] = useState(app?.description || "");
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -35,7 +35,7 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({
     if (app) {
       setName(app.name);
       setUrl(app.url);
-      setIconUrl(app.iconUrl || "");
+      setIconUrl(app.iconUrl || "https://i.ibb.co/cSJdk808/icon.png");
       setDescription(app.description || "");
       setConfirmDelete(false);
       setUploadError(null);
@@ -99,7 +99,7 @@ export const EditAppModal: React.FC<EditAppModalProps> = ({
     e.preventDefault();
     if (!name.trim() || !url.trim()) return;
 
-    const finalIcon = iconUrl.trim() || getWebsiteFaviconUrl(url.trim()) || getWebsiteFallbackIcon(url.trim());
+    const finalIcon = iconUrl.trim() || "https://i.ibb.co/cSJdk808/icon.png";
 
     onSave({
       ...app,

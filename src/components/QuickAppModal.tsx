@@ -32,7 +32,7 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
 }) => {
   const [url, setUrl] = useState("");
   const [name, setName] = useState("");
-  const [iconUrl, setIconUrl] = useState("");
+  const [iconUrl, setIconUrl] = useState("https://i.ibb.co/cSJdk808/icon.png");
   const [description, setDescription] = useState("");
   const [isValidating, setIsValidating] = useState(false);
   const [detectedSuccess, setDetectedSuccess] = useState(false);
@@ -85,11 +85,6 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
           setName(detectedTitle);
         }
 
-        const detectedFavicon = data.faviconUrl || data.googleFaviconUrl;
-        if (detectedFavicon && !userEditedIconRef.current) {
-          setIconUrl(detectedFavicon);
-        }
-
         setDetectedSuccess(true);
       }
     } catch (err: any) {
@@ -128,10 +123,7 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
         formatted = "https://" + formatted.replace(/^\/\//, "");
       }
 
-      if (!userEditedIconRef.current) {
-        const autoIcon = getWebsiteFaviconUrl(formatted) || getWebsiteFallbackIcon(formatted);
-        setIconUrl(autoIcon);
-      }
+
 
       const brand = detectWebsiteBrand(formatted);
       if (brand && (!userEditedNameRef.current || !name.trim())) {
@@ -236,7 +228,7 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
       }
     }
 
-    const autoDetectedIcon = getWebsiteFaviconUrl(validUrl) || getWebsiteFallbackIcon(validUrl);
+    const autoDetectedIcon = "https://i.ibb.co/cSJdk808/icon.png";
 
     const newApp: AppProject = {
       id: `${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
@@ -256,7 +248,7 @@ export const QuickAppModal: React.FC<QuickAppModalProps> = ({
     // Reset form
     setUrl("");
     setName("");
-    setIconUrl("");
+    setIconUrl("https://i.ibb.co/cSJdk808/icon.png");
     setDescription("");
     userEditedNameRef.current = false;
     userEditedIconRef.current = false;

@@ -110,7 +110,7 @@ export default function App() {
   // Inline Quick Convert state
   const [quickUrl, setQuickUrl] = useState("");
   const [quickName, setQuickName] = useState("");
-  const [quickIconUrl, setQuickIconUrl] = useState("");
+  const [quickIconUrl, setQuickIconUrl] = useState("https://i.ibb.co/cSJdk808/icon.png");
   const [quickValidating, setQuickValidating] = useState(false);
   const [quickDetected, setQuickDetected] = useState(false);
   const [heroUploadError, setHeroUploadError] = useState<string | null>(null);
@@ -194,11 +194,6 @@ export default function App() {
       setQuickDetected(true);
     }
 
-    if (!userEditedQuickIconRef.current) {
-      const autoIcon = getWebsiteFaviconUrl(formatted) || getWebsiteFallbackIcon(formatted);
-      setQuickIconUrl(autoIcon);
-    }
-
     if (quickAbortRef.current) {
       quickAbortRef.current.abort();
     }
@@ -222,10 +217,7 @@ export default function App() {
           setQuickName(detectedTitle);
         }
 
-        const detectedFavicon = data.faviconUrl || data.googleFaviconUrl;
-        if (detectedFavicon && !userEditedQuickIconRef.current) {
-          setQuickIconUrl(detectedFavicon);
-        }
+
 
         setQuickDetected(true);
       }
@@ -265,10 +257,7 @@ export default function App() {
         formatted = "https://" + formatted.replace(/^\/\//, "");
       }
 
-      if (!userEditedQuickIconRef.current) {
-        const autoIcon = getWebsiteFaviconUrl(formatted) || getWebsiteFallbackIcon(formatted);
-        setQuickIconUrl(autoIcon);
-      }
+
 
       const brand = detectWebsiteBrand(formatted);
       if (brand && (!userEditedQuickNameRef.current || !quickName.trim())) {
@@ -315,7 +304,7 @@ export default function App() {
       }
     }
 
-    const autoDetectedIcon = getWebsiteFaviconUrl(validUrl) || getWebsiteFallbackIcon(validUrl);
+    const autoDetectedIcon = "https://i.ibb.co/cSJdk808/icon.png";
 
     const newApp: AppProject = {
       id: `${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
@@ -342,7 +331,7 @@ export default function App() {
 
     setQuickUrl("");
     setQuickName("");
-    setQuickIconUrl("");
+    setQuickIconUrl("https://i.ibb.co/cSJdk808/icon.png");
     userEditedQuickNameRef.current = false;
     userEditedQuickIconRef.current = false;
   };
